@@ -5,8 +5,8 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
-import android.content.Intent;
 import android.content.ContentValues;
+import android.content.Intent;
 import android.net.Uri;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -17,17 +17,13 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
-import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ScaleGestureDetector;
 import android.widget.Button;
-import android.widget.FrameLayout;
-import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -36,24 +32,24 @@ import android.widget.Toast;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
-import java.util.ArrayDeque;
 import java.util.Date;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    private static final int PICK_EXTRACT_IMAGE = 101;
-    private static final int PICK_ANIMATE_IMAGE = 102;
+    private static final int PICK_EXTRACT = 100;
+    private static final int PICK_ANIMATE = 200;
 
     private final int BLUE = Color.rgb(20, 105, 245);
     private final int DARK = Color.rgb(12, 24, 54);
-    private final int TEXT = Color.rgb(30, 41, 59);
-    private final int LIGHT = Color.rgb(245, 248, 255);
+    private final int TEXT = Color.rgb(55, 65, 85);
+    private final int SOFT = Color.rgb(246, 249, 255);
     private final int PURPLE = Color.rgb(130, 70, 255);
 
     private LinearLayout root;
-    private ExtractEditorView extractEditor;
-    private AnimationPreviewView animationPreview;
+    private ExtractView extractView;
+    private MotionView motionView;
+    private TextView sizeText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -65,9 +61,9 @@ public class MainActivity extends Activity {
         return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    private TextView text(String value, int sp, int color, int style) {
+    private TextView text(String s, int sp, int color, int style) {
         TextView t = new TextView(this);
-        t.setText(value);
+        t.setText(s);
         t.setTextSize(sp);
         t.setTextColor(color);
         t.setTypeface(Typeface.DEFAULT, style);
@@ -82,58 +78,47 @@ public class MainActivity extends Activity {
         return g;
     }
 
-    private GradientDrawable strokeBg(int color, int strokeColor, int radius, int strokeDp) {
+    private GradientDrawable border(int color, int stroke, int radius) {
         GradientDrawable g = bg(color, radius);
-        g.setStroke(dp(strokeDp), strokeColor);
+        g.setStroke(dp(1), stroke);
         return g;
     }
 
-    private Button button(String label, int color, int textColor) {
+    private Button button(String s, int color, int textColor) {
         Button b = new Button(this);
-        b.setText(label);
-        b.setTextColor(textColor);
-        b.setTextSize(14);
+        b.setText(s);
         b.setAllCaps(false);
+        b.setTextSize(14);
+        b.setTextColor(textColor);
         b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         b.setBackground(bg(color, 16));
-        b.setPadding(dp(10), dp(8), dp(10), dp(8));
         return b;
     }
 
-    private TextView chip(String value) {
-        TextView c = text(value, 12, BLUE, Typeface.BOLD);
-        c.setGravity(Gravity.CENTER);
-        c.setPadding(dp(12), dp(8), dp(12), dp(8));
-        c.setBackground(strokeBg(Color.WHITE, Color.rgb(210, 225, 255), 14, 1));
-        return c;
-    }
-
-    private LinearLayout verticalRoot() {
+    private void page() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
 
-        LinearLayout base = new LinearLayout(this);
-        base.setOrientation(LinearLayout.VERTICAL);
-        base.setPadding(dp(16), dp(18), dp(16), dp(18));
-        base.setBackgroundColor(Color.rgb(248, 250, 255));
+        root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(16), dp(18), dp(16), dp(18));
+        root.setBackgroundColor(SOFT);
 
-        scroll.addView(base, new ScrollView.LayoutParams(
+        scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
         setContentView(scroll);
-        root = base;
-        return base;
     }
 
     private void showHome() {
-        LinearLayout base = verticalRoot();
+        page();
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        base.addView(top, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(top);
 
         TextView menu = text("☰", 28, DARK, Typeface.BOLD);
         top.addView(menu);
@@ -141,70 +126,67 @@ public class MainActivity extends Activity {
         TextView title = text("  Image Zeta Animator", 20, DARK, Typeface.BOLD);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView crown = text("♛", 24, Color.rgb(255, 170, 0), Typeface.BOLD);
-        top.addView(crown);
+        TextView pro = text("PRO", 13, Color.WHITE, Typeface.BOLD);
+        pro.setGravity(Gravity.CENTER);
+        pro.setBackground(bg(BLUE, 20));
+        top.addView(pro, new LinearLayout.LayoutParams(dp(58), dp(34)));
 
-        TextView sub = text("Prepara y da vida a tus imágenes con calidad profesional.", 15, Color.rgb(95, 105, 130), Typeface.NORMAL);
+        TextView sub = text("Prepara y da vida a tus imágenes con calidad profesional.", 15, Color.rgb(90, 100, 125), Typeface.NORMAL);
         sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, dp(18), 0, dp(16));
-        base.addView(sub);
+        sub.setPadding(0, dp(20), 0, dp(12));
+        root.addView(sub);
 
-        LinearLayout card1 = homeBigCard("Extraer fondo Pro+", "Quita el fondo sin perder tamaño ni calidad.", "PNG", BLUE);
-        card1.setOnClickListener(v -> showExtract());
-        base.addView(card1);
-
-        LinearLayout card2 = homeBigCard("Animar imagen o fondo", "Crea movimiento fácil con puntos, flechas y anclas.", "▶", PURPLE);
-        card2.setOnClickListener(v -> showAnimate());
-        base.addView(card2);
+        root.addView(homeCard("Extraer fondo Pro+", "Quita el fondo sin perder tamaño ni calidad.", "PNG", BLUE, v -> showExtract()));
+        root.addView(homeCard("Animar imagen o fondo", "Crea movimiento fácil con puntos y anclas.", "▶", PURPLE, v -> showAnimate()));
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setPadding(0, dp(8), 0, dp(8));
-        base.addView(row);
+        root.addView(row);
 
         row.addView(smallCard("Proyectos recientes", "Continúa donde lo dejaste.", "▣"), new LinearLayout.LayoutParams(0, dp(120), 1));
-        Space(row, 10);
+        row.addView(space(10));
         row.addView(smallCard("Sin marca de agua", "Exporta limpio y profesional.", "✓"), new LinearLayout.LayoutParams(0, dp(120), 1));
 
-        LinearLayout quality = smallCard("100% calidad original", "Sin compresión. Tamaño y calidad intactos.", "HD");
-        base.addView(quality, new LinearLayout.LayoutParams(-1, dp(105)));
+        root.addView(smallCard("100% calidad original", "Sin compresión. Tamaño y calidad intactos.", "HD"), new LinearLayout.LayoutParams(-1, dp(110)));
 
-        TextView footer = text("Inicio        Proyectos        Ajustes", 13, BLUE, Typeface.BOLD);
-        footer.setGravity(Gravity.CENTER);
-        footer.setPadding(0, dp(16), 0, 0);
-        base.addView(footer);
+        TextView nav = text("Inicio        Proyectos        Ajustes", 13, BLUE, Typeface.BOLD);
+        nav.setGravity(Gravity.CENTER);
+        nav.setPadding(0, dp(18), 0, 0);
+        root.addView(nav);
     }
 
-    private LinearLayout homeBigCard(String title, String desc, String icon, int color) {
+    private LinearLayout homeCard(String title, String desc, String icon, int color, View.OnClickListener click) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(16), dp(16), dp(16), dp(16));
-        card.setBackground(strokeBg(Color.WHITE, Color.rgb(225, 232, 245), 24, 1));
+        card.setBackground(border(Color.WHITE, Color.rgb(225, 232, 245), 24));
+        card.setOnClickListener(click);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(150));
         lp.setMargins(0, dp(8), 0, dp(10));
         card.setLayoutParams(lp);
 
-        TextView ic = text(icon, 24, Color.WHITE, Typeface.BOLD);
+        TextView ic = text(icon, 23, Color.WHITE, Typeface.BOLD);
         ic.setGravity(Gravity.CENTER);
-        ic.setBackground(bg(color, 18));
+        ic.setBackground(bg(color, 20));
         card.addView(ic, new LinearLayout.LayoutParams(dp(86), dp(86)));
 
-        LinearLayout texts = new LinearLayout(this);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setPadding(dp(16), 0, dp(8), 0);
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        info.setPadding(dp(16), 0, dp(8), 0);
+        info.addView(text(title, 19, color, Typeface.BOLD));
 
-        texts.addView(text(title, 20, color, Typeface.BOLD));
         TextView d = text(desc, 14, TEXT, Typeface.NORMAL);
         d.setPadding(0, dp(6), 0, 0);
-        texts.addView(d);
+        info.addView(d);
 
-        card.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+        card.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
 
         TextView arrow = text("➜", 24, Color.WHITE, Typeface.BOLD);
         arrow.setGravity(Gravity.CENTER);
-        arrow.setBackground(bg(color, 40));
+        arrow.setBackground(bg(color, 28));
         card.addView(arrow, new LinearLayout.LayoutParams(dp(46), dp(46)));
 
         return card;
@@ -214,34 +196,44 @@ public class MainActivity extends Activity {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setPadding(dp(14), dp(12), dp(14), dp(12));
-        c.setBackground(strokeBg(Color.WHITE, Color.rgb(225, 232, 245), 18, 1));
-        TextView ic = text(icon, 18, BLUE, Typeface.BOLD);
-        c.addView(ic);
-        TextView tt = text(title, 15, DARK, Typeface.BOLD);
-        tt.setPadding(0, dp(8), 0, 0);
-        c.addView(tt);
-        TextView dd = text(desc, 12, Color.rgb(95, 105, 130), Typeface.NORMAL);
-        dd.setPadding(0, dp(5), 0, 0);
-        c.addView(dd);
+        c.setBackground(border(Color.WHITE, Color.rgb(225, 232, 245), 18));
+
+        c.addView(text(icon, 18, BLUE, Typeface.BOLD));
+
+        TextView t = text(title, 15, DARK, Typeface.BOLD);
+        t.setPadding(0, dp(8), 0, 0);
+        c.addView(t);
+
+        TextView d = text(desc, 12, Color.rgb(95, 105, 130), Typeface.NORMAL);
+        d.setPadding(0, dp(5), 0, 0);
+        c.addView(d);
+
         return c;
     }
 
-    private void Space(LinearLayout row, int w) {
+    private View space(int w) {
         TextView s = new TextView(this);
-        row.addView(s, new LinearLayout.LayoutParams(dp(w), 1));
+        s.setWidth(dp(w));
+        return s;
+    }
+
+    private TextView chip(String s) {
+        TextView c = text(s, 12, BLUE, Typeface.BOLD);
+        c.setGravity(Gravity.CENTER);
+        c.setBackground(border(Color.WHITE, Color.rgb(210, 225, 255), 14));
+        return c;
     }
 
     private void showExtract() {
-        LinearLayout base = verticalRoot();
+        page();
 
         LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        base.addView(bar);
+        root.addView(bar);
 
         TextView back = text("‹", 34, DARK, Typeface.BOLD);
         back.setOnClickListener(v -> showHome());
-        bar.addView(back, new LinearLayout.LayoutParams(dp(45), -2));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(42), -2));
 
         TextView title = text("Extraer fondo", 20, DARK, Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
@@ -249,205 +241,184 @@ public class MainActivity extends Activity {
 
         TextView help = text("?", 18, DARK, Typeface.BOLD);
         help.setGravity(Gravity.CENTER);
-        help.setBackground(strokeBg(Color.WHITE, Color.rgb(220, 230, 245), 30, 1));
+        help.setBackground(border(Color.WHITE, Color.rgb(220, 230, 245), 30));
         bar.addView(help, new LinearLayout.LayoutParams(dp(38), dp(38)));
 
         LinearLayout chips = new LinearLayout(this);
         chips.setOrientation(LinearLayout.HORIZONTAL);
         chips.setPadding(0, dp(14), 0, dp(12));
-        base.addView(chips);
+        root.addView(chips);
 
-        TextView sizeChip = chip("Tamaño original: esperando imagen");
-        chips.addView(sizeChip, new LinearLayout.LayoutParams(0, -2, 1));
-        Space(chips, 8);
-        chips.addView(chip("Calidad: original"), new LinearLayout.LayoutParams(0, -2, 1));
+        sizeText = chip("Tamaño original: abre imagen");
+        chips.addView(sizeText, new LinearLayout.LayoutParams(0, dp(42), 1));
+        chips.addView(space(8));
+        chips.addView(chip("Calidad: original"), new LinearLayout.LayoutParams(0, dp(42), 1));
 
-        extractEditor = new ExtractEditorView(this, sizeChip);
-        extractEditor.setBackground(strokeBg(Color.WHITE, Color.rgb(220, 230, 245), 18, 1));
-        base.addView(extractEditor, new LinearLayout.LayoutParams(-1, dp(410)));
+        extractView = new ExtractView();
+        extractView.setBackground(border(Color.WHITE, Color.rgb(220, 230, 245), 18));
+        root.addView(extractView, new LinearLayout.LayoutParams(-1, dp(410)));
 
-        LinearLayout mode = new LinearLayout(this);
-        mode.setOrientation(LinearLayout.HORIZONTAL);
-        mode.setPadding(0, dp(14), 0, dp(8));
-        base.addView(mode);
+        LinearLayout modes = new LinearLayout(this);
+        modes.setOrientation(LinearLayout.HORIZONTAL);
+        modes.setPadding(0, dp(14), 0, dp(8));
+        root.addView(modes);
 
-        Button automatic = button("Selección automática", Color.WHITE, BLUE);
-        Button manual = button("Corrección manual", Color.WHITE, DARK);
-        mode.addView(automatic, new LinearLayout.LayoutParams(0, dp(48), 1));
-        Space(mode, 8);
-        mode.addView(manual, new LinearLayout.LayoutParams(0, dp(48), 1));
+        modes.addView(button("Selección automática", Color.WHITE, BLUE), new LinearLayout.LayoutParams(0, dp(50), 1));
+        modes.addView(space(8));
+        modes.addView(button("Corrección manual", Color.WHITE, DARK), new LinearLayout.LayoutParams(0, dp(50), 1));
 
-        LinearLayout tools1 = new LinearLayout(this);
-        tools1.setOrientation(LinearLayout.HORIZONTAL);
-        base.addView(tools1);
-
-        tools1.addView(tool("Auto", "✦", () -> extractEditor.autoRemoveBackground()), new LinearLayout.LayoutParams(0, dp(82), 1));
-        Space(tools1, 8);
-        tools1.addView(tool("Punto", "•", () -> extractEditor.setEraseMode(true, 34)), new LinearLayout.LayoutParams(0, dp(82), 1));
-        Space(tools1, 8);
-        tools1.addView(tool("Borde", "□", () -> extractEditor.setEraseMode(true, 18)), new LinearLayout.LayoutParams(0, dp(82), 1));
-
-        LinearLayout tools2 = new LinearLayout(this);
-        tools2.setOrientation(LinearLayout.HORIZONTAL);
-        tools2.setPadding(0, dp(8), 0, 0);
-        base.addView(tools2);
-
-        tools2.addView(tool("Borrador suave", "⌁", () -> extractEditor.setEraseMode(true, 55)), new LinearLayout.LayoutParams(0, dp(82), 1));
-        Space(tools2, 8);
-        tools2.addView(tool("Borrador duro", "◆", () -> extractEditor.setEraseMode(true, 28)), new LinearLayout.LayoutParams(0, dp(82), 1));
-        Space(tools2, 8);
-        tools2.addView(tool("Precisión", "⌖", () -> extractEditor.setEraseMode(true, 10)), new LinearLayout.LayoutParams(0, dp(82), 1));
-
-        LinearLayout tools3 = new LinearLayout(this);
-        tools3.setOrientation(LinearLayout.HORIZONTAL);
-        tools3.setPadding(0, dp(8), 0, dp(12));
-        base.addView(tools3);
-
-        tools3.addView(tool("Restaurar", "↶", () -> extractEditor.setEraseMode(false, 34)), new LinearLayout.LayoutParams(0, dp(72), 1));
-        Space(tools3, 8);
-        tools3.addView(tool("Zoom", "⌕", () -> extractEditor.toggleZoomMode()), new LinearLayout.LayoutParams(0, dp(72), 1));
+        addToolRow("Auto", "Punto", "Borde", 1);
+        addToolRow("Borrador suave", "Borrador duro", "Precisión", 2);
+        addToolRow("Restaurar", "Zoom", "", 3);
 
         Button open = button("Abrir imagen", Color.WHITE, BLUE);
-        open.setOnClickListener(v -> pickImage(PICK_EXTRACT_IMAGE));
-        base.addView(open, new LinearLayout.LayoutParams(-1, dp(52)));
+        open.setOnClickListener(v -> pickImage(PICK_EXTRACT));
+        root.addView(open, new LinearLayout.LayoutParams(-1, dp(52)));
 
         Button export = button("Exportar PNG transparente", BLUE, Color.WHITE);
-        LinearLayout.LayoutParams exlp = new LinearLayout.LayoutParams(-1, dp(58));
-        exlp.setMargins(0, dp(10), 0, dp(8));
-        base.addView(export, exlp);
+        LinearLayout.LayoutParams exp = new LinearLayout.LayoutParams(-1, dp(58));
+        exp.setMargins(0, dp(10), 0, dp(8));
+        root.addView(export, exp);
         export.setOnClickListener(v -> savePng());
 
         TextView ok = text("✓ Sin pérdida de resolución", 13, Color.rgb(20, 150, 85), Typeface.BOLD);
         ok.setGravity(Gravity.CENTER);
-        base.addView(ok);
+        root.addView(ok);
     }
 
-    private View tool(String label, String icon, final Runnable action) {
-        LinearLayout t = new LinearLayout(this);
-        t.setOrientation(LinearLayout.VERTICAL);
-        t.setGravity(Gravity.CENTER);
-        t.setPadding(dp(4), dp(6), dp(4), dp(6));
-        t.setBackground(strokeBg(Color.WHITE, Color.rgb(220, 230, 245), 16, 1));
+    private void addToolRow(String a, String b, String c, int rowType) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(4), 0, dp(4));
+        root.addView(row);
 
-        TextView ic = text(icon, 24, BLUE, Typeface.BOLD);
-        ic.setGravity(Gravity.CENTER);
-        t.addView(ic);
+        row.addView(tool(a, rowType, 0), new LinearLayout.LayoutParams(0, dp(70), 1));
+        row.addView(tool(b, rowType, 1), new LinearLayout.LayoutParams(0, dp(70), 1));
 
-        TextView l = text(label, 11, DARK, Typeface.BOLD);
-        l.setGravity(Gravity.CENTER);
-        t.addView(l);
+        if (!c.isEmpty()) {
+            row.addView(tool(c, rowType, 2), new LinearLayout.LayoutParams(0, dp(70), 1));
+        }
+    }
 
-        t.setOnClickListener(v -> action.run());
-        return t;
+    private Button tool(String name, int row, int pos) {
+        Button b = button(name, Color.WHITE, DARK);
+        b.setTextSize(11);
+
+        b.setOnClickListener(v -> {
+            if (extractView == null) return;
+
+            if (name.equals("Auto")) extractView.autoRemove();
+            else if (name.equals("Punto")) extractView.setTool(true, 22);
+            else if (name.equals("Borde")) extractView.setTool(true, 12);
+            else if (name.equals("Borrador suave")) extractView.setTool(true, 54);
+            else if (name.equals("Borrador duro")) extractView.setTool(true, 30);
+            else if (name.equals("Precisión")) extractView.setTool(true, 9);
+            else if (name.equals("Restaurar")) extractView.setTool(false, 35);
+            else if (name.equals("Zoom")) extractView.changeZoom();
+        });
+
+        return b;
     }
 
     private void showAnimate() {
-        LinearLayout base = verticalRoot();
+        page();
 
         LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        base.addView(bar);
+        root.addView(bar);
 
         TextView back = text("‹", 34, DARK, Typeface.BOLD);
         back.setOnClickListener(v -> showHome());
-        bar.addView(back, new LinearLayout.LayoutParams(dp(45), -2));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(42), -2));
 
         TextView title = text("Animar", 20, DARK, Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
         bar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView menu = text("⋮", 26, DARK, Typeface.BOLD);
+        TextView menu = text("⋮", 28, DARK, Typeface.BOLD);
         menu.setGravity(Gravity.CENTER);
         bar.addView(menu, new LinearLayout.LayoutParams(dp(42), -2));
 
         LinearLayout tools = new LinearLayout(this);
-        tools.setOrientation(LinearLayout.HORIZONTAL);
         tools.setPadding(0, dp(12), 0, dp(10));
-        base.addView(tools);
+        root.addView(tools);
 
-        tools.addView(animTool("Movimiento"), new LinearLayout.LayoutParams(0, dp(58), 1));
-        tools.addView(animTool("Puntos"), new LinearLayout.LayoutParams(0, dp(58), 1));
-        tools.addView(animTool("Ancla"), new LinearLayout.LayoutParams(0, dp(58), 1));
-        tools.addView(animTool("Velocidad"), new LinearLayout.LayoutParams(0, dp(58), 1));
-        tools.addView(animTool("Máscara"), new LinearLayout.LayoutParams(0, dp(58), 1));
+        tools.addView(animLabel("Movimiento"), new LinearLayout.LayoutParams(0, dp(58), 1));
+        tools.addView(animLabel("Puntos"), new LinearLayout.LayoutParams(0, dp(58), 1));
+        tools.addView(animLabel("Ancla"), new LinearLayout.LayoutParams(0, dp(58), 1));
+        tools.addView(animLabel("Velocidad"), new LinearLayout.LayoutParams(0, dp(58), 1));
+        tools.addView(animLabel("Máscara"), new LinearLayout.LayoutParams(0, dp(58), 1));
 
-        animationPreview = new AnimationPreviewView(this);
-        animationPreview.setBackgroundColor(Color.WHITE);
-        base.addView(animationPreview, new LinearLayout.LayoutParams(-1, dp(430)));
+        motionView = new MotionView();
+        motionView.setBackground(bg(Color.WHITE, 18));
+        root.addView(motionView, new LinearLayout.LayoutParams(-1, dp(430)));
 
         Button open = button("Abrir fondo o imagen", Color.WHITE, BLUE);
-        open.setOnClickListener(v -> pickImage(PICK_ANIMATE_IMAGE));
-        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(-1, dp(52));
-        olp.setMargins(0, dp(12), 0, dp(8));
-        base.addView(open, olp);
+        LinearLayout.LayoutParams op = new LinearLayout.LayoutParams(-1, dp(52));
+        op.setMargins(0, dp(12), 0, dp(8));
+        root.addView(open, op);
+        open.setOnClickListener(v -> pickImage(PICK_ANIMATE));
 
-        TextView timeline = text("▶   00:03 / 00:10     ━━━━━●━━━━", 14, DARK, Typeface.BOLD);
+        TextView timeline = text("▶   00:03 / 00:10      ━━━━━●━━━━", 14, DARK, Typeface.BOLD);
         timeline.setGravity(Gravity.CENTER);
-        timeline.setPadding(0, dp(8), 0, dp(8));
-        timeline.setBackground(strokeBg(Color.WHITE, Color.rgb(220, 230, 245), 16, 1));
-        base.addView(timeline, new LinearLayout.LayoutParams(-1, dp(55)));
+        timeline.setBackground(border(Color.WHITE, Color.rgb(220, 230, 245), 16));
+        root.addView(timeline, new LinearLayout.LayoutParams(-1, dp(55)));
 
-        TextView speed = text("Velocidad global    ━━━━━●━━    1.00x", 13, TEXT, Typeface.NORMAL);
+        TextView speed = text("Velocidad global     ━━━━━●━━     1.00x", 13, TEXT, Typeface.NORMAL);
         speed.setPadding(0, dp(14), 0, dp(8));
-        base.addView(speed);
+        root.addView(speed);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        base.addView(row);
+        LinearLayout exp = new LinearLayout(this);
+        exp.setOrientation(LinearLayout.HORIZONTAL);
+        root.addView(exp);
 
         Button export = button("Exportar video", BLUE, Color.WHITE);
-        export.setOnClickListener(v -> Toast.makeText(this, "Motor MP4/GIF se agregará en el siguiente bloque.", Toast.LENGTH_LONG).show());
-        row.addView(export, new LinearLayout.LayoutParams(0, dp(58), 1));
-
-        Space(row, 8);
-        Button mp4 = button("MP4", Color.WHITE, BLUE);
-        row.addView(mp4, new LinearLayout.LayoutParams(dp(70), dp(58)));
-
-        Space(row, 8);
-        Button gif = button("GIF", Color.WHITE, DARK);
-        row.addView(gif, new LinearLayout.LayoutParams(dp(70), dp(58)));
+        export.setOnClickListener(v -> Toast.makeText(this, "Exportación MP4/GIF se agregará en la siguiente versión.", Toast.LENGTH_LONG).show());
+        exp.addView(export, new LinearLayout.LayoutParams(0, dp(58), 1));
+        exp.addView(space(8));
+        exp.addView(button("MP4", Color.WHITE, BLUE), new LinearLayout.LayoutParams(dp(70), dp(58)));
+        exp.addView(space(8));
+        exp.addView(button("GIF", Color.WHITE, DARK), new LinearLayout.LayoutParams(dp(70), dp(58)));
     }
 
-    private TextView animTool(String label) {
-        TextView v = text(label, 10, BLUE, Typeface.BOLD);
+    private TextView animLabel(String s) {
+        TextView v = text(s, 10, BLUE, Typeface.BOLD);
         v.setGravity(Gravity.CENTER);
-        v.setBackground(strokeBg(Color.WHITE, Color.rgb(220, 230, 245), 14, 1));
+        v.setBackground(border(Color.WHITE, Color.rgb(220, 230, 245), 14));
         return v;
     }
 
     private void pickImage(int request) {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.setType("image/*");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, request);
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.setType("image/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(i, request);
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
 
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
 
         try {
-            Uri uri = data.getData();
-            getContentResolver().takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-            );
+            Bitmap bitmap = loadBitmap(data.getData());
 
-            Bitmap bitmap = loadBitmap(uri);
             if (bitmap == null) {
                 Toast.makeText(this, "No se pudo abrir la imagen.", Toast.LENGTH_SHORT).show();
                 return;
             }
 
-            if (requestCode == PICK_EXTRACT_IMAGE && extractEditor != null) {
-                extractEditor.setBitmap(bitmap);
+            if (request == PICK_EXTRACT && extractView != null) {
+                extractView.setBitmap(bitmap);
+                if (sizeText != null) {
+                    sizeText.setText("Tamaño original: " + bitmap.getWidth() + " × " + bitmap.getHeight());
+                }
             }
 
-            if (requestCode == PICK_ANIMATE_IMAGE && animationPreview != null) {
-                animationPreview.setBitmap(bitmap);
+            if (request == PICK_ANIMATE && motionView != null) {
+                motionView.setBitmap(bitmap);
             }
 
         } catch (Exception e) {
@@ -456,37 +427,80 @@ public class MainActivity extends Activity {
     }
 
     private Bitmap loadBitmap(Uri uri) throws Exception {
-        InputStream is = getContentResolver().openInputStream(uri);
+        InputStream input = getContentResolver().openInputStream(uri);
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        Bitmap b = BitmapFactory.decodeStream(is, null, options);
-        if (is != null) is.close();
+        Bitmap bitmap = BitmapFactory.decodeStream(input, null, options);
+        if (input != null) input.close();
 
-        if (b == null) return null;
-
-        if (b.getConfig() != Bitmap.Config.ARGB_8888) {
-            b = b.copy(Bitmap.Config.ARGB_8888, true);
-        } else if (!b.isMutable()) {
-            b = b.copy(Bitmap.Config.ARGB_8888, true);
-        }
-
-        return b;
+        if (bitmap == null) return null;
+        return bitmap.copy(Bitmap.Config.ARGB_8888, true);
     }
 
     private void savePng() {
-        if (extractEditor == null || extractEditor.getBitmap() == null) {
+        if (extractView == null || extractView.getBitmap() == null) {
             Toast.makeText(this, "Primero abre una imagen.", Toast.LENGTH_SHORT).show();
             return;
         }
 
         try {
-            Bitmap outBitmap = extractEditor.getBitmap();
-            String name = "ImageZeta_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".png";
+            Bitmap outputBitmap = extractView.getBitmap();
+            String fileName = "ImageZeta_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".png";
 
             ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Image Zeta Animator");
-               
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+
+            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new Exception("No se pudo crear el archivo PNG.");
+
+            OutputStream output = getContentResolver().openOutputStream(uri);
+            outputBitmap.compress(Bitmap.CompressFormat.PNG, 100, output);
+            if (output != null) output.close();
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                getContentResolver().update(uri, values, null, null);
+            }
+
+            Toast.makeText(this, "PNG guardado sin cambiar tamaño original.", Toast.LENGTH_LONG).show();
+
+        } catch (Exception e) {
+            Toast.makeText(this, "Error al guardar PNG: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    public class ExtractView extends View {
+
+        private Bitmap original;
+        private Bitmap work;
+        private Canvas workCanvas;
+
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Paint clearPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Matrix matrix = new Matrix();
+        private final Matrix inverse = new Matrix();
+
+        private boolean eraser = true;
+        private float brush = 30f;
+        private float zoom = 1f;
+
+        public ExtractView() {
+            super(MainActivity.this);
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+            clearPaint.setStyle(Paint.Style.FILL);
+            clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+        }
+
+        public void setBitmap(Bitmap bitmap) {
+            original = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+            work = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+            workCanvas = new Canvas(work);
+            zoom = 1f;
+            invalida
