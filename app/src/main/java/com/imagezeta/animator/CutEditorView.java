@@ -7,6 +7,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Shader;
@@ -17,68 +18,84 @@ import android.widget.Toast;
 
 import java.util.ArrayDeque;
 
-public class CutEditorView extends View {
+public class EditorCanvasView extends View {
 
-    public static final int MODE_ERASE_SOFT = 1;
-    public static final int MODE_ERASE_HARD = 2;
-    public static final int MODE_RESTORE = 3;
-    public static final int MODE_MAGIC = 4;
+    public static final int TOOL_MOVE = 0;
+    public static final int TOOL_ERASE_SOFT = 1;
+    public static final int TOOL_ERASE_HARD = 2;
+    public static final int TOOL_RESTORE = 3;
+    public static final int TOOL_MAGIC = 4;
 
-    private Bitmap originalBitmap;
-    private Bitmap workBitmap;
+    public interface ZoomListener {
+        void onZoomChanged(float percent);
+    }
+
+    private ZoomListener zoomListener;
+
+    private Bitmap original;
+    private Bitmap work;
     private Canvas workCanvas;
 
-    private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    private final Paint checkerA = new Paint();
-    private final Paint checkerB = new Paint();
-
-    private Paint eraseHardPaint;
-    private Paint eraseSoftPaint;
+    private Paint imagePaint;
+    private Paint hardErase;
+    private Paint softErase;
     private Paint restorePaint;
+    private Paint checkerA;
+    private Paint checkerB;
 
-    private final Matrix viewMatrix = new Matrix();
-    private final Matrix inverseMatrix = new Matrix();
-
-    private final ArrayDeque<Bitmap> undoStack = new ArrayDeque<>();
+    private Matrix matrix = new Matrix();
+    private Matrix inverse = new Matrix();
 
     private ScaleGestureDetector scaleDetector;
 
-    private int mode = MODE_ERASE_SOFT;
-    private int tolerance = 45;
+    private ArrayDeque<Bitmap> undoStack = new ArrayDeque<>();
+    private ArrayDeque<Bitmap> redoStack = new ArrayDeque<>();
+
+    private int tool = TOOL_ERASE_SOFT;
+    private int tolerance = 60;
+    private int edgeSoftness = 35;
+    private boolean holeRecognition = true;
+
     private float brushSize = 35f;
 
     private float scale = 1f;
     private float minScale = 1f;
-    private float translateX = 0f;
-    private float translateY = 0f;
+    private float maxScale = 45f;
+    private float moveX = 0f;
+    private float moveY = 0f;
 
-    private float lastPanX = 0f;
-    private float lastPanY = 0f;
+    private float lastPanX;
+    private float lastPanY;
     private boolean panning = false;
 
-    private float lastBitmapX = 0f;
-    private float lastBitmapY = 0f;
+    private float lastX;
+    private float lastY;
     private boolean drawing = false;
 
-    public CutEditorView(Context context) {
+    public EditorCanvasView(Context context) {
         super(context);
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
-        checkerA.setColor(Color.rgb(235, 238, 245));
-        checkerB.setColor(Color.WHITE);
+        imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
-        eraseHardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        eraseHardPaint.setStyle(Paint.Style.STROKE);
-        eraseHardPaint.setStrokeCap(Paint.Cap.ROUND);
-        eraseHardPaint.setStrokeJoin(Paint.Join.ROUND);
-        eraseHardPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+        checkerA = new Paint();
+        checkerA.setColor(Color.rgb(220, 220, 220));
 
-        eraseSoftPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        eraseSoftPaint.setStyle(Paint.Style.STROKE);
-        eraseSoftPaint.setStrokeCap(Paint.Cap.ROUND);
-        eraseSoftPaint.setStrokeJoin(Paint.Join.ROUND);
-        eraseSoftPaint.setAlpha(120);
-        eraseSoftPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+        checkerB = new Paint();
+        checkerB.setColor(Color.rgb(245, 245, 245));
+
+        hardErase = new Paint(Paint.ANTI_ALIAS_FLAG);
+        hardErase.setStyle(Paint.Style.STROKE);
+        hardErase.setStrokeCap(Paint.Cap.ROUND);
+        hardErase.setStrokeJoin(Paint.Join.ROUND);
+        hardErase.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+
+        softErase = new Paint(Paint.ANTI_ALIAS_FLAG);
+        softErase.setStyle(Paint.Style.STROKE);
+        softErase.setStrokeCap(Paint.Cap.ROUND);
+        softErase.setStrokeJoin(Paint.Join.ROUND);
+        softErase.setAlpha(130);
+        softErase.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
 
         restorePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         restorePaint.setStyle(Paint.Style.STROKE);
@@ -88,72 +105,88 @@ public class CutEditorView extends View {
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
-                if (workBitmap == null) return false;
+                if (work == null) return false;
 
                 float focusX = detector.getFocusX();
                 float focusY = detector.getFocusY();
-                float oldScale = scale;
 
+                float oldScale = scale;
                 scale *= detector.getScaleFactor();
-                scale = Math.max(minScale, Math.min(scale, minScale * 12f));
+                scale = Math.max(minScale, Math.min(scale, minScale * maxScale));
 
                 float factor = scale / oldScale;
-                translateX = focusX - factor * (focusX - translateX);
-                translateY = focusY - factor * (focusY - translateY);
+                moveX = focusX - factor * (focusX - moveX);
+                moveY = focusY - factor * (focusY - moveY);
 
-                limitPan();
+                limitMove();
+                notifyZoom();
                 invalidate();
                 return true;
             }
         });
     }
 
+    public void setZoomListener(ZoomListener listener) {
+        zoomListener = listener;
+    }
+
     public boolean hasImage() {
-        return workBitmap != null;
+        return work != null;
     }
 
     public Bitmap getOutputBitmap() {
-        return workBitmap;
+        return work;
     }
 
     public void setImage(Bitmap bitmap) {
-        originalBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
-        workBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
-        workCanvas = new Canvas(workBitmap);
+        original = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+        work = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+        workCanvas = new Canvas(work);
 
-        restorePaint.setShader(new BitmapShader(originalBitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+        restorePaint.setShader(new BitmapShader(original, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
 
         undoStack.clear();
-        resetView();
+        redoStack.clear();
+
+        post(this::resetView);
         invalidate();
     }
 
-    public void setMode(int newMode) {
-        mode = newMode;
+    public void setTool(int newTool) {
+        tool = newTool;
     }
 
     public void setBrushSize(int size) {
-        brushSize = Math.max(5, size);
+        brushSize = Math.max(1, size);
     }
 
     public void setTolerance(int value) {
-        tolerance = Math.max(5, value);
+        tolerance = Math.max(1, value);
+    }
+
+    public void setEdgeSoftness(int value) {
+        edgeSoftness = Math.max(0, Math.min(100, value));
+        int alpha = 80 + (edgeSoftness * 140 / 100);
+        softErase.setAlpha(alpha);
+    }
+
+    public void setHoleRecognitionEnabled(boolean enabled) {
+        holeRecognition = enabled;
     }
 
     public void resetView() {
-        if (workBitmap == null || getWidth() == 0 || getHeight() == 0) {
-            invalidate();
-            return;
-        }
+        if (work == null || getWidth() <= 0 || getHeight() <= 0) return;
 
-        float sx = getWidth() / (float) workBitmap.getWidth();
-        float sy = getHeight() / (float) workBitmap.getHeight();
+        float sx = getWidth() / (float) work.getWidth();
+        float sy = getHeight() / (float) work.getHeight();
 
-        minScale = Math.min(sx, sy);
+        minScale = Math.min(sx, sy) * 0.92f;
         scale = minScale;
-        translateX = (getWidth() - workBitmap.getWidth() * scale) / 2f;
-        translateY = (getHeight() - workBitmap.getHeight() * scale) / 2f;
 
+        moveX = (getWidth() - work.getWidth() * scale) / 2f;
+        moveY = (getHeight() - work.getHeight() * scale) / 2f;
+
+        notifyZoom();
         invalidate();
     }
 
@@ -163,73 +196,104 @@ public class CutEditorView extends View {
             return;
         }
 
-        workBitmap = undoStack.removeLast();
-        workCanvas = new Canvas(workBitmap);
+        if (work != null) {
+            redoStack.addLast(work.copy(Bitmap.Config.ARGB_8888, true));
+        }
+
+        work = undoStack.removeLast();
+        workCanvas = new Canvas(work);
+        invalidate();
+    }
+
+    public void redo() {
+        if (redoStack.isEmpty()) {
+            Toast.makeText(getContext(), "No hay cambios para rehacer.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (work != null) {
+            undoStack.addLast(work.copy(Bitmap.Config.ARGB_8888, true));
+        }
+
+        work = redoStack.removeLast();
+        workCanvas = new Canvas(work);
         invalidate();
     }
 
     private void saveUndo() {
-        if (workBitmap == null) return;
+        if (work == null) return;
 
-        if (undoStack.size() >= 10) {
+        if (undoStack.size() >= 12) {
             undoStack.removeFirst();
         }
 
-        undoStack.addLast(workBitmap.copy(Bitmap.Config.ARGB_8888, true));
+        undoStack.addLast(work.copy(Bitmap.Config.ARGB_8888, true));
+        redoStack.clear();
     }
 
-    @Override
-    protected void onSizeChanged(int w, int h, int oldW, int oldH) {
-        super.onSizeChanged(w, h, oldW, oldH);
-        resetView();
+    private void notifyZoom() {
+        if (zoomListener != null && minScale > 0) {
+            zoomListener.onZoomChanged((scale / minScale) * 100f);
+        }
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        drawChecker(canvas);
+        drawBackground(canvas);
 
-        if (workBitmap == null) {
+        if (work == null) {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setColor(Color.rgb(80, 90, 110));
+            p.setColor(Color.WHITE);
+            p.setTextSize(sp(18));
             p.setTextAlign(Paint.Align.CENTER);
-            p.setTextSize(sp(16));
             canvas.drawText("Abre una imagen", getWidth() / 2f, getHeight() / 2f, p);
             return;
         }
 
         buildMatrix();
-        canvas.drawBitmap(workBitmap, viewMatrix, imagePaint);
+        canvas.drawBitmap(work, matrix, imagePaint);
     }
 
-    private void drawChecker(Canvas canvas) {
-        int size = dp(18);
+    private void drawBackground(Canvas canvas) {
+        canvas.drawColor(Color.rgb(72, 72, 72));
 
-        for (int y = 0; y < getHeight(); y += size) {
-            for (int x = 0; x < getWidth(); x += size) {
+        if (work == null) return;
+
+        buildMatrix();
+
+        canvas.save();
+        canvas.concat(matrix);
+
+        int size = Math.max(10, work.getWidth() / 40);
+
+        for (int y = 0; y < work.getHeight(); y += size) {
+            for (int x = 0; x < work.getWidth(); x += size) {
                 boolean alt = ((x / size) + (y / size)) % 2 == 0;
                 canvas.drawRect(x, y, x + size, y + size, alt ? checkerA : checkerB);
             }
         }
+
+        canvas.restore();
     }
 
     private void buildMatrix() {
-        viewMatrix.reset();
-        viewMatrix.postScale(scale, scale);
-        viewMatrix.postTranslate(translateX, translateY);
-        viewMatrix.invert(inverseMatrix);
+        matrix.reset();
+        matrix.postScale(scale, scale);
+        matrix.postTranslate(moveX, moveY);
+        matrix.invert(inverse);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (workBitmap == null) return true;
+        if (work == null) return true;
 
         getParent().requestDisallowInterceptTouchEvent(true);
         scaleDetector.onTouchEvent(event);
 
         if (event.getPointerCount() >= 2) {
-            handlePan(event);
+            handleTwoFinger(event);
             return true;
         }
 
@@ -240,24 +304,25 @@ public class CutEditorView extends View {
         return true;
     }
 
-    private void handlePan(MotionEvent event) {
+    private void handleTwoFinger(MotionEvent event) {
         int action = event.getActionMasked();
 
         float cx = (event.getX(0) + event.getX(1)) / 2f;
         float cy = (event.getY(0) + event.getY(1)) / 2f;
 
         if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_DOWN) {
-            lastPanX = cx;
-            lastPanY = cy;
             panning = true;
+            lastPanX = cx;
+            lastPanY = cy;
         } else if (action == MotionEvent.ACTION_MOVE && panning) {
-            translateX += cx - lastPanX;
-            translateY += cy - lastPanY;
+            moveX += cx - lastPanX;
+            moveY += cy - lastPanY;
 
             lastPanX = cx;
             lastPanY = cy;
 
-            limitPan();
+            limitMove();
+            notifyZoom();
             invalidate();
         } else if (action == MotionEvent.ACTION_POINTER_UP || action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             panning = false;
@@ -265,18 +330,19 @@ public class CutEditorView extends View {
     }
 
     private void handleOneFinger(MotionEvent event) {
-        float[] point = screenToBitmap(event.getX(), event.getY());
+        if (tool == TOOL_MOVE) return;
 
+        float[] point = toBitmapPoint(event.getX(), event.getY());
         float x = point[0];
         float y = point[1];
 
-        if (x < 0 || y < 0 || x >= workBitmap.getWidth() || y >= workBitmap.getHeight()) {
+        if (x < 0 || y < 0 || x >= work.getWidth() || y >= work.getHeight()) {
             return;
         }
 
         int action = event.getActionMasked();
 
-        if (mode == MODE_MAGIC) {
+        if (tool == TOOL_MAGIC) {
             if (action == MotionEvent.ACTION_DOWN) {
                 saveUndo();
                 magicErase((int) x, (int) y);
@@ -286,40 +352,41 @@ public class CutEditorView extends View {
 
         if (action == MotionEvent.ACTION_DOWN) {
             saveUndo();
-            lastBitmapX = x;
-            lastBitmapY = y;
             drawing = true;
+            lastX = x;
+            lastY = y;
             drawStroke(x, y, x + 0.1f, y + 0.1f);
         } else if (action == MotionEvent.ACTION_MOVE && drawing) {
-            drawStroke(lastBitmapX, lastBitmapY, x, y);
-            lastBitmapX = x;
-            lastBitmapY = y;
+            drawStroke(lastX, lastY, x, y);
+            lastX = x;
+            lastY = y;
         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             drawing = false;
         }
     }
 
-    private float[] screenToBitmap(float sx, float sy) {
+    private float[] toBitmapPoint(float sx, float sy) {
         buildMatrix();
-        float[] point = new float[]{sx, sy};
-        inverseMatrix.mapPoints(point);
-        return point;
+        float[] p = new float[]{sx, sy};
+        inverse.mapPoints(p);
+        return p;
     }
 
     private void drawStroke(float x1, float y1, float x2, float y2) {
         if (workCanvas == null) return;
 
-        float radius = brushSize * (workBitmap.getWidth() / 1080f);
-        radius = Math.max(4f, radius);
+        float radius = brushSize * (work.getWidth() / 1080f);
+        radius = Math.max(1.5f, radius);
+
         float strokeWidth = radius * 2f;
 
-        if (mode == MODE_ERASE_HARD) {
-            eraseHardPaint.setStrokeWidth(strokeWidth);
-            workCanvas.drawLine(x1, y1, x2, y2, eraseHardPaint);
-        } else if (mode == MODE_ERASE_SOFT) {
-            eraseSoftPaint.setStrokeWidth(strokeWidth);
-            workCanvas.drawLine(x1, y1, x2, y2, eraseSoftPaint);
-        } else if (mode == MODE_RESTORE) {
+        if (tool == TOOL_ERASE_HARD) {
+            hardErase.setStrokeWidth(strokeWidth);
+            workCanvas.drawLine(x1, y1, x2, y2, hardErase);
+        } else if (tool == TOOL_ERASE_SOFT) {
+            softErase.setStrokeWidth(strokeWidth);
+            workCanvas.drawLine(x1, y1, x2, y2, softErase);
+        } else if (tool == TOOL_RESTORE) {
             restorePaint.setStrokeWidth(strokeWidth);
             workCanvas.drawLine(x1, y1, x2, y2, restorePaint);
         }
@@ -328,31 +395,34 @@ public class CutEditorView extends View {
     }
 
     private void magicErase(int startX, int startY) {
-        int w = workBitmap.getWidth();
-        int h = workBitmap.getHeight();
-
-        if (startX < 0 || startY < 0 || startX >= w || startY >= h) return;
+        int w = work.getWidth();
+        int h = work.getHeight();
 
         int[] pixels = new int[w * h];
-        workBitmap.getPixels(pixels, 0, w, 0, 0, w, h);
+        work.getPixels(pixels, 0, w, 0, 0, w, h);
 
-        int startColor = pixels[startY * w + startX];
+        int startIndex = startY * w + startX;
+        int startColor = pixels[startIndex];
+
         int sr = Color.red(startColor);
         int sg = Color.green(startColor);
         int sb = Color.blue(startColor);
         int sa = Color.alpha(startColor);
 
-        boolean[] visited = new boolean[w * h];
+        boolean[] seen = new boolean[w * h];
         ArrayDeque<Integer> queue = new ArrayDeque<>();
-        queue.add(startY * w + startX);
-        visited[startY * w + startX] = true;
+
+        queue.add(startIndex);
+        seen[startIndex] = true;
 
         int limit = tolerance * 3;
+        int maxPixels = w * h;
+        int touched = 0;
 
         while (!queue.isEmpty()) {
             int index = queue.removeFirst();
-
             int p = pixels[index];
+
             int diff = Math.abs(Color.red(p) - sr)
                     + Math.abs(Color.green(p) - sg)
                     + Math.abs(Color.blue(p) - sb)
@@ -361,58 +431,57 @@ public class CutEditorView extends View {
             if (diff > limit) continue;
 
             pixels[index] = Color.TRANSPARENT;
+            touched++;
+
+            if (!holeRecognition && touched > maxPixels / 2) break;
 
             int x = index % w;
             int y = index / w;
 
-            addNeighbor(queue, visited, x + 1, y, w, h);
-            addNeighbor(queue, visited, x - 1, y, w, h);
-            addNeighbor(queue, visited, x, y + 1, w, h);
-            addNeighbor(queue, visited, x, y - 1, w, h);
+            add(queue, seen, x + 1, y, w, h);
+            add(queue, seen, x - 1, y, w, h);
+            add(queue, seen, x, y + 1, w, h);
+            add(queue, seen, x, y - 1, w, h);
         }
 
-        workBitmap.setPixels(pixels, 0, w, 0, 0, w, h);
-        workCanvas = new Canvas(workBitmap);
+        work.setPixels(pixels, 0, w, 0, 0, w, h);
+        workCanvas = new Canvas(work);
         invalidate();
     }
 
-    private void addNeighbor(ArrayDeque<Integer> queue, boolean[] visited, int x, int y, int w, int h) {
+    private void add(ArrayDeque<Integer> queue, boolean[] seen, int x, int y, int w, int h) {
         if (x < 0 || y < 0 || x >= w || y >= h) return;
 
         int index = y * w + x;
 
-        if (!visited[index]) {
-            visited[index] = true;
+        if (!seen[index]) {
+            seen[index] = true;
             queue.add(index);
         }
     }
 
-    private void limitPan() {
-        if (workBitmap == null) return;
+    private void limitMove() {
+        if (work == null) return;
 
-        float imgW = workBitmap.getWidth() * scale;
-        float imgH = workBitmap.getHeight() * scale;
+        float imgW = work.getWidth() * scale;
+        float imgH = work.getHeight() * scale;
 
         if (imgW <= getWidth()) {
-            translateX = (getWidth() - imgW) / 2f;
+            moveX = (getWidth() - imgW) / 2f;
         } else {
             float minX = getWidth() - imgW;
-            translateX = Math.max(minX, Math.min(0, translateX));
+            moveX = Math.max(minX, Math.min(0, moveX));
         }
 
         if (imgH <= getHeight()) {
-            translateY = (getHeight() - imgH) / 2f;
+            moveY = (getHeight() - imgH) / 2f;
         } else {
             float minY = getHeight() - imgH;
-            translateY = Math.max(minY, Math.min(0, translateY));
+            moveY = Math.max(minY, Math.min(0, moveY));
         }
-    }
-
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     private float sp(int value) {
         return value * getResources().getDisplayMetrics().scaledDensity;
     }
-                            }
+            }
