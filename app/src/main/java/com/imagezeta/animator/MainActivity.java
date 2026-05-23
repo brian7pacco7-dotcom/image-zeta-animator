@@ -167,15 +167,19 @@ public class MainActivity extends Activity {
         TextView spacer = new TextView(this);
         top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
 
-        Button magic = iconButton("✦");
-        magic.setOnClickListener(v -> selectTool(EditorCanvasView.TOOL_MAGIC));
-        top.addView(magic, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        Button magicTop = iconButton("✦");
+        magicTop.setOnClickListener(v -> selectTool(EditorCanvasView.TOOL_MAGIC));
+        top.addView(magicTop, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
-        Button select = iconButton("□");
-        select.setOnClickListener(v -> toast("Modo cuadro se agregará en el siguiente paso."));
+        Button rect = iconButton("□");
+        rect.setOnClickListener(v -> {
+            editor.setTool(EditorCanvasView.TOOL_RECT);
+            resetToolButtons();
+            toast("Modo cuadro: dibuja un cuadro para limitar la varita.");
+        });
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(48), dp(48));
         slp.setMargins(dp(8), 0, 0, 0);
-        top.addView(select, slp);
+        top.addView(rect, slp);
 
         Button hand = iconButton("☝");
         hand.setOnClickListener(v -> {
@@ -333,11 +337,14 @@ public class MainActivity extends Activity {
         reset.setOnClickListener(v -> editor.resetView());
         rowBottom.addView(reset, new LinearLayout.LayoutParams(0, -1, 1));
 
-        Button apply = toolButton("Aplicar");
-        apply.setOnClickListener(v -> toast("Aplicado."));
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(0, -1, 1);
-        alp.setMargins(dp(6), 0, 0, 0);
-        rowBottom.addView(apply, alp);
+        Button clearBox = toolButton("Sin cuadro");
+        clearBox.setOnClickListener(v -> {
+            editor.clearRectLimit();
+            toast("Cuadro eliminado.");
+        });
+        LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(0, -1, 1);
+        cbLp.setMargins(dp(6), 0, 0, 0);
+        rowBottom.addView(clearBox, cbLp);
 
         selectTool(EditorCanvasView.TOOL_ERASE_SOFT);
     }
