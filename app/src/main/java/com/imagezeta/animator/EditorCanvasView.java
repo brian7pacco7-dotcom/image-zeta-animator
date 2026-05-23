@@ -9,6 +9,7 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -24,6 +25,7 @@ public class EditorCanvasView extends View {
     public static final int TOOL_ERASE_HARD = 2;
     public static final int TOOL_RESTORE = 3;
     public static final int TOOL_MAGIC = 4;
+    public static final int TOOL_RECT = 5;
 
     public interface ZoomListener {
         void onZoomChanged(float percent);
@@ -41,6 +43,7 @@ public class EditorCanvasView extends View {
     private final Paint restorePaint;
     private final Paint checkerA;
     private final Paint checkerB;
+    private final Paint rectPaint;
 
     private final Matrix matrix = new Matrix();
     private final Matrix inverse = new Matrix();
@@ -59,7 +62,7 @@ public class EditorCanvasView extends View {
 
     private float scale = 1f;
     private float minScale = 1f;
-    private final float maxScale = 45f;
+    private final float maxScale = 55f;
     private float moveX = 0f;
     private float moveY = 0f;
 
@@ -70,6 +73,14 @@ public class EditorCanvasView extends View {
     private float lastX;
     private float lastY;
     private boolean drawing = false;
+
+    private boolean twoFingerActive = false;
+
+    private boolean hasRectLimit = false;
+    private boolean drawingRect = false;
+    private float rectStartX;
+    private float rectStartY;
+    private RectF limitRect = new RectF();
 
     public EditorCanvasView(Context context) {
         super(context);
@@ -101,10 +112,19 @@ public class EditorCanvasView extends View {
         restorePaint.setStrokeCap(Paint.Cap.ROUND);
         restorePaint.setStrokeJoin(Paint.Join.ROUND);
 
+        rectPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        rectPaint.setStyle(Paint.Style.STROKE);
+        rectPaint.setStrokeWidth(3f);
+        rectPaint.setColor(Color.WHITE);
+
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
                 if (work == null) return false;
+
+                twoFingerActive = true;
+                drawing = false;
+                drawingRect = false;
 
                 float focusX = detector.getFocusX();
                 float focusY = detector.getFocusY();
@@ -146,6 +166,8 @@ public class EditorCanvasView extends View {
 
         undoStack.clear();
         redoStack.clear();
+        hasRectLimit = false;
+        limitRect.setEmpty();
 
         post(this::resetView);
         invalidate();
@@ -153,6 +175,10 @@ public class EditorCanvasView extends View {
 
     public void setTool(int newTool) {
         tool = newTool;
+
+        if (tool == TOOL_RECT) {
+            Toast.makeText(getContext(), "Dibuja un cuadro para limitar la varita.", Toast.LENGTH_SHORT).show();
+        }
     }
 
     public void setBrushSize(int size) {
@@ -165,7 +191,7 @@ public class EditorCanvasView extends View {
 
     public void setEdgeSoftness(int value) {
         edgeSoftness = Math.max(0, Math.min(100, value));
-        int alpha = 80 + (edgeSoftness * 140 / 100);
+        int alpha = 90 + (edgeSoftness * 130 / 100);
         softErase.setAlpha(alpha);
     }
 
@@ -186,6 +212,12 @@ public class EditorCanvasView extends View {
         moveY = (getHeight() - work.getHeight() * scale) / 2f;
 
         notifyZoom();
+        invalidate();
+    }
+
+    public void clearRectLimit() {
+        hasRectLimit = false;
+        limitRect.setEmpty();
         invalidate();
     }
 
@@ -253,6 +285,8 @@ public class EditorCanvasView extends View {
 
         buildMatrix();
         canvas.drawBitmap(work, matrix, imagePaint);
+
+        drawLimitRect(canvas);
     }
 
     private void drawBackground(Canvas canvas) {
@@ -277,6 +311,16 @@ public class EditorCanvasView extends View {
         canvas.restore();
     }
 
+    private void drawLimitRect(Canvas canvas) {
+        if (!hasRectLimit || work == null) return;
+
+        RectF screenRect = new RectF(limitRect);
+        buildMatrix();
+        matrix.mapRect(screenRect);
+
+        canvas.drawRect(screenRect, rectPaint);
+    }
+
     private void buildMatrix() {
         matrix.reset();
         matrix.postScale(scale, scale);
@@ -292,11 +336,23 @@ public class EditorCanvasView extends View {
         scaleDetector.onTouchEvent(event);
 
         if (event.getPointerCount() >= 2) {
+            twoFingerActive = true;
+            drawing = false;
+            drawingRect = false;
             handleTwoFinger(event);
             return true;
         }
 
-        if (!scaleDetector.isInProgress()) {
+        int action = event.getActionMasked();
+
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if (twoFingerActive) {
+                twoFingerActive = false;
+                return true;
+            }
+        }
+
+        if (!scaleDetector.isInProgress() && !twoFingerActive) {
             handleOneFinger(event);
         }
 
@@ -341,6 +397,11 @@ public class EditorCanvasView extends View {
 
         int action = event.getActionMasked();
 
+        if (tool == TOOL_RECT) {
+            handleRectTool(action, x, y);
+            return;
+        }
+
         if (tool == TOOL_MAGIC) {
             if (action == MotionEvent.ACTION_DOWN) {
                 saveUndo();
@@ -361,6 +422,34 @@ public class EditorCanvasView extends View {
             lastY = y;
         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             drawing = false;
+        }
+    }
+
+    private void handleRectTool(int action, float x, float y) {
+        if (action == MotionEvent.ACTION_DOWN) {
+            rectStartX = x;
+            rectStartY = y;
+            drawingRect = true;
+            hasRectLimit = true;
+            limitRect.set(x, y, x, y);
+            invalidate();
+        } else if (action == MotionEvent.ACTION_MOVE && drawingRect) {
+            limitRect.set(
+                    Math.min(rectStartX, x),
+                    Math.min(rectStartY, y),
+                    Math.max(rectStartX, x),
+                    Math.max(rectStartY, y)
+            );
+            invalidate();
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            drawingRect = false;
+
+            if (limitRect.width() < 5 || limitRect.height() < 5) {
+                hasRectLimit = false;
+                limitRect.setEmpty();
+            }
+
+            invalidate();
         }
     }
 
@@ -397,6 +486,11 @@ public class EditorCanvasView extends View {
         int w = work.getWidth();
         int h = work.getHeight();
 
+        if (hasRectLimit && !limitRect.contains(startX, startY)) {
+            Toast.makeText(getContext(), "Toca dentro del cuadro.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         int[] pixels = new int[w * h];
         work.getPixels(pixels, 0, w, 0, 0, w, h);
 
@@ -415,11 +509,17 @@ public class EditorCanvasView extends View {
         seen[startIndex] = true;
 
         int limit = tolerance * 3;
-        int maxPixels = w * h;
-        int touched = 0;
 
         while (!queue.isEmpty()) {
             int index = queue.removeFirst();
+
+            int x = index % w;
+            int y = index / w;
+
+            if (hasRectLimit && !limitRect.contains(x, y)) {
+                continue;
+            }
+
             int p = pixels[index];
 
             int diff = Math.abs(Color.red(p) - sr)
@@ -430,22 +530,63 @@ public class EditorCanvasView extends View {
             if (diff > limit) continue;
 
             pixels[index] = Color.TRANSPARENT;
-            touched++;
-
-            if (!holeRecognition && touched > maxPixels / 2) break;
-
-            int x = index % w;
-            int y = index / w;
 
             add(queue, seen, x + 1, y, w, h);
             add(queue, seen, x - 1, y, w, h);
             add(queue, seen, x, y + 1, w, h);
             add(queue, seen, x, y - 1, w, h);
+
+            if (holeRecognition) {
+                add(queue, seen, x + 1, y + 1, w, h);
+                add(queue, seen, x - 1, y - 1, w, h);
+                add(queue, seen, x + 1, y - 1, w, h);
+                add(queue, seen, x - 1, y + 1, w, h);
+            }
         }
 
         work.setPixels(pixels, 0, w, 0, 0, w, h);
+        softenTransparentEdges();
         workCanvas = new Canvas(work);
         invalidate();
+    }
+
+    private void softenTransparentEdges() {
+        if (work == null || edgeSoftness <= 0) return;
+
+        int w = work.getWidth();
+        int h = work.getHeight();
+
+        int[] pixels = new int[w * h];
+        int[] copy = new int[w * h];
+
+        work.getPixels(pixels, 0, w, 0, 0, w, h);
+        System.arraycopy(pixels, 0, copy, 0, pixels.length);
+
+        int passes = Math.max(1, edgeSoftness / 25);
+
+        for (int pass = 0; pass < passes; pass++) {
+            for (int y = 1; y < h - 1; y++) {
+                for (int x = 1; x < w - 1; x++) {
+                    int i = y * w + x;
+
+                    if (Color.alpha(copy[i]) == 0) continue;
+
+                    boolean nearTransparent =
+                            Color.alpha(copy[i - 1]) == 0 ||
+                            Color.alpha(copy[i + 1]) == 0 ||
+                            Color.alpha(copy[i - w]) == 0 ||
+                            Color.alpha(copy[i + w]) == 0;
+
+                    if (nearTransparent) {
+                        int p = pixels[i];
+                        int newAlpha = Math.max(0, Color.alpha(p) - 70);
+                        pixels[i] = Color.argb(newAlpha, Color.red(p), Color.green(p), Color.blue(p));
+                    }
+                }
+            }
+        }
+
+        work.setPixels(pixels, 0, w, 0, 0, w, h);
     }
 
     private void add(ArrayDeque<Integer> queue, boolean[] seen, int x, int y, int w, int h) {
@@ -483,4 +624,4 @@ public class EditorCanvasView extends View {
     private float sp(int value) {
         return value * getResources().getDisplayMetrics().scaledDensity;
     }
-  }
+                }
