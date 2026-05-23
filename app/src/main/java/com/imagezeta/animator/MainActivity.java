@@ -112,6 +112,19 @@ public class MainActivity extends Activity {
         setContentView(scroll);
     }
 
+    private View space(int w) {
+        TextView s = new TextView(this);
+        s.setWidth(dp(w));
+        return s;
+    }
+
+    private TextView chip(String s) {
+        TextView c = text(s, 12, BLUE, Typeface.BOLD);
+        c.setGravity(Gravity.CENTER);
+        c.setBackground(border(Color.WHITE, Color.rgb(210, 225, 255), 14));
+        return c;
+    }
+
     private void showHome() {
         page();
 
@@ -211,19 +224,6 @@ public class MainActivity extends Activity {
         return c;
     }
 
-    private View space(int w) {
-        TextView s = new TextView(this);
-        s.setWidth(dp(w));
-        return s;
-    }
-
-    private TextView chip(String s) {
-        TextView c = text(s, 12, BLUE, Typeface.BOLD);
-        c.setGravity(Gravity.CENTER);
-        c.setBackground(border(Color.WHITE, Color.rgb(210, 225, 255), 14));
-        return c;
-    }
-
     private void showExtract() {
         page();
 
@@ -267,9 +267,9 @@ public class MainActivity extends Activity {
         modes.addView(space(8));
         modes.addView(button("Corrección manual", Color.WHITE, DARK), new LinearLayout.LayoutParams(0, dp(50), 1));
 
-        addToolRow("Auto", "Punto", "Borde", 1);
-        addToolRow("Borrador suave", "Borrador duro", "Precisión", 2);
-        addToolRow("Restaurar", "Zoom", "", 3);
+        addToolRow("Auto", "Punto", "Borde");
+        addToolRow("Borrador suave", "Borrador duro", "Precisión");
+        addToolRow("Restaurar", "Zoom", "");
 
         Button open = button("Abrir imagen", Color.WHITE, BLUE);
         open.setOnClickListener(v -> pickImage(PICK_EXTRACT));
@@ -286,21 +286,23 @@ public class MainActivity extends Activity {
         root.addView(ok);
     }
 
-    private void addToolRow(String a, String b, String c, int rowType) {
+    private void addToolRow(String a, String b, String c) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setPadding(0, dp(4), 0, dp(4));
         root.addView(row);
 
-        row.addView(tool(a, rowType, 0), new LinearLayout.LayoutParams(0, dp(70), 1));
-        row.addView(tool(b, rowType, 1), new LinearLayout.LayoutParams(0, dp(70), 1));
+        row.addView(tool(a), new LinearLayout.LayoutParams(0, dp(70), 1));
+        row.addView(space(8));
+        row.addView(tool(b), new LinearLayout.LayoutParams(0, dp(70), 1));
 
         if (!c.isEmpty()) {
-            row.addView(tool(c, rowType, 2), new LinearLayout.LayoutParams(0, dp(70), 1));
+            row.addView(space(8));
+            row.addView(tool(c), new LinearLayout.LayoutParams(0, dp(70), 1));
         }
     }
 
-    private Button tool(String name, int row, int pos) {
+    private Button tool(String name) {
         Button b = button(name, Color.WHITE, DARK);
         b.setTextSize(11);
 
@@ -503,4 +505,5 @@ public class MainActivity extends Activity {
             work = bitmap.copy(Bitmap.Config.ARGB_8888, true);
             workCanvas = new Canvas(work);
             zoom = 1f;
-            invalida
+            invalidate();
+    
