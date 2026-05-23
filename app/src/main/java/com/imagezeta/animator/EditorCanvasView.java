@@ -41,8 +41,8 @@ public class EditorCanvasView extends View {
     private final Paint hardErase;
     private final Paint softErase;
     private final Paint restorePaint;
-    private final Paint checkerA;
-    private final Paint checkerB;
+    private final Paint checkerDark;
+    private final Paint checkerLight;
     private final Paint rectPaint;
 
     private final Matrix matrix = new Matrix();
@@ -62,7 +62,7 @@ public class EditorCanvasView extends View {
 
     private float scale = 1f;
     private float minScale = 1f;
-    private final float maxScale = 55f;
+    private final float maxZoomFactor = 80f;
     private float moveX = 0f;
     private float moveY = 0f;
 
@@ -74,13 +74,13 @@ public class EditorCanvasView extends View {
     private float lastY;
     private boolean drawing = false;
 
-    private boolean twoFingerActive = false;
+    private boolean suppressSingleAfterMulti = false;
 
     private boolean hasRectLimit = false;
     private boolean drawingRect = false;
     private float rectStartX;
     private float rectStartY;
-    private RectF limitRect = new RectF();
+    private final RectF limitRect = new RectF();
 
     public EditorCanvasView(Context context) {
         super(context);
@@ -88,11 +88,11 @@ public class EditorCanvasView extends View {
 
         imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
-        checkerA = new Paint();
-        checkerA.setColor(Color.rgb(220, 220, 220));
+        checkerDark = new Paint();
+        checkerDark.setColor(Color.rgb(150, 150, 150));
 
-        checkerB = new Paint();
-        checkerB.setColor(Color.rgb(245, 245, 245));
+        checkerLight = new Paint();
+        checkerLight.setColor(Color.rgb(245, 245, 245));
 
         hardErase = new Paint(Paint.ANTI_ALIAS_FLAG);
         hardErase.setStyle(Paint.Style.STROKE);
@@ -104,7 +104,7 @@ public class EditorCanvasView extends View {
         softErase.setStyle(Paint.Style.STROKE);
         softErase.setStrokeCap(Paint.Cap.ROUND);
         softErase.setStrokeJoin(Paint.Join.ROUND);
-        softErase.setAlpha(130);
+        softErase.setAlpha(150);
         softErase.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
 
         restorePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -114,7 +114,7 @@ public class EditorCanvasView extends View {
 
         rectPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         rectPaint.setStyle(Paint.Style.STROKE);
-        rectPaint.setStrokeWidth(3f);
+        rectPaint.setStrokeWidth(4f);
         rectPaint.setColor(Color.WHITE);
 
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -122,7 +122,7 @@ public class EditorCanvasView extends View {
             public boolean onScale(ScaleGestureDetector detector) {
                 if (work == null) return false;
 
-                twoFingerActive = true;
+                suppressSingleAfterMulti = true;
                 drawing = false;
                 drawingRect = false;
 
@@ -131,7 +131,7 @@ public class EditorCanvasView extends View {
 
                 float oldScale = scale;
                 scale *= detector.getScaleFactor();
-                scale = Math.max(minScale, Math.min(scale, minScale * maxScale));
+                scale = Math.max(minScale, Math.min(scale, minScale * maxZoomFactor));
 
                 float factor = scale / oldScale;
                 moveX = focusX - factor * (focusX - moveX);
@@ -191,7 +191,7 @@ public class EditorCanvasView extends View {
 
     public void setEdgeSoftness(int value) {
         edgeSoftness = Math.max(0, Math.min(100, value));
-        int alpha = 90 + (edgeSoftness * 130 / 100);
+        int alpha = 100 + (edgeSoftness * 120 / 100);
         softErase.setAlpha(alpha);
     }
 
@@ -233,6 +233,7 @@ public class EditorCanvasView extends View {
 
         work = undoStack.removeLast();
         workCanvas = new Canvas(work);
+        restorePaint.setShader(new BitmapShader(original, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
         invalidate();
     }
 
@@ -248,6 +249,7 @@ public class EditorCanvasView extends View {
 
         work = redoStack.removeLast();
         workCanvas = new Canvas(work);
+        restorePaint.setShader(new BitmapShader(original, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
         invalidate();
     }
 
@@ -272,7 +274,7 @@ public class EditorCanvasView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        drawBackground(canvas);
+        drawTransparentBackground(canvas);
 
         if (work == null) {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -285,12 +287,11 @@ public class EditorCanvasView extends View {
 
         buildMatrix();
         canvas.drawBitmap(work, matrix, imagePaint);
-
         drawLimitRect(canvas);
     }
 
-    private void drawBackground(Canvas canvas) {
-        canvas.drawColor(Color.rgb(72, 72, 72));
+    private void drawTransparentBackground(Canvas canvas) {
+        canvas.drawColor(Color.rgb(74, 74, 74));
 
         if (work == null) return;
 
@@ -299,12 +300,12 @@ public class EditorCanvasView extends View {
         canvas.save();
         canvas.concat(matrix);
 
-        int size = Math.max(10, work.getWidth() / 40);
+        int size = Math.max(8, work.getWidth() / 45);
 
         for (int y = 0; y < work.getHeight(); y += size) {
             for (int x = 0; x < work.getWidth(); x += size) {
                 boolean alt = ((x / size) + (y / size)) % 2 == 0;
-                canvas.drawRect(x, y, x + size, y + size, alt ? checkerA : checkerB);
+                canvas.drawRect(x, y, x + size, y + size, alt ? checkerLight : checkerDark);
             }
         }
 
@@ -336,7 +337,7 @@ public class EditorCanvasView extends View {
         scaleDetector.onTouchEvent(event);
 
         if (event.getPointerCount() >= 2) {
-            twoFingerActive = true;
+            suppressSingleAfterMulti = true;
             drawing = false;
             drawingRect = false;
             handleTwoFinger(event);
@@ -345,14 +346,15 @@ public class EditorCanvasView extends View {
 
         int action = event.getActionMasked();
 
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            if (twoFingerActive) {
-                twoFingerActive = false;
-                return true;
+        if (suppressSingleAfterMulti) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                suppressSingleAfterMulti = false;
+                panning = false;
             }
+            return true;
         }
 
-        if (!scaleDetector.isInProgress() && !twoFingerActive) {
+        if (!scaleDetector.isInProgress()) {
             handleOneFinger(event);
         }
 
@@ -494,6 +496,10 @@ public class EditorCanvasView extends View {
         int[] pixels = new int[w * h];
         work.getPixels(pixels, 0, w, 0, 0, w, h);
 
+        boolean[] selected = new boolean[w * h];
+        boolean[] seen = new boolean[w * h];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+
         int startIndex = startY * w + startX;
         int startColor = pixels[startIndex];
 
@@ -501,9 +507,6 @@ public class EditorCanvasView extends View {
         int sg = Color.green(startColor);
         int sb = Color.blue(startColor);
         int sa = Color.alpha(startColor);
-
-        boolean[] seen = new boolean[w * h];
-        ArrayDeque<Integer> queue = new ArrayDeque<>();
 
         queue.add(startIndex);
         seen[startIndex] = true;
@@ -516,9 +519,7 @@ public class EditorCanvasView extends View {
             int x = index % w;
             int y = index / w;
 
-            if (hasRectLimit && !limitRect.contains(x, y)) {
-                continue;
-            }
+            if (hasRectLimit && !limitRect.contains(x, y)) continue;
 
             int p = pixels[index];
 
@@ -529,7 +530,7 @@ public class EditorCanvasView extends View {
 
             if (diff > limit) continue;
 
-            pixels[index] = Color.TRANSPARENT;
+            selected[index] = true;
 
             add(queue, seen, x + 1, y, w, h);
             add(queue, seen, x - 1, y, w, h);
@@ -544,49 +545,61 @@ public class EditorCanvasView extends View {
             }
         }
 
+        applyMagicSelection(pixels, selected, w, h);
         work.setPixels(pixels, 0, w, 0, 0, w, h);
-        softenTransparentEdges();
         workCanvas = new Canvas(work);
         invalidate();
     }
 
-    private void softenTransparentEdges() {
-        if (work == null || edgeSoftness <= 0) return;
+    private void applyMagicSelection(int[] pixels, boolean[] selected, int w, int h) {
+        int[] originalPixels = pixels.clone();
 
-        int w = work.getWidth();
-        int h = work.getHeight();
-
-        int[] pixels = new int[w * h];
-        int[] copy = new int[w * h];
-
-        work.getPixels(pixels, 0, w, 0, 0, w, h);
-        System.arraycopy(pixels, 0, copy, 0, pixels.length);
-
-        int passes = Math.max(1, edgeSoftness / 25);
-
-        for (int pass = 0; pass < passes; pass++) {
-            for (int y = 1; y < h - 1; y++) {
-                for (int x = 1; x < w - 1; x++) {
-                    int i = y * w + x;
-
-                    if (Color.alpha(copy[i]) == 0) continue;
-
-                    boolean nearTransparent =
-                            Color.alpha(copy[i - 1]) == 0 ||
-                            Color.alpha(copy[i + 1]) == 0 ||
-                            Color.alpha(copy[i - w]) == 0 ||
-                            Color.alpha(copy[i + w]) == 0;
-
-                    if (nearTransparent) {
-                        int p = pixels[i];
-                        int newAlpha = Math.max(0, Color.alpha(p) - 70);
-                        pixels[i] = Color.argb(newAlpha, Color.red(p), Color.green(p), Color.blue(p));
-                    }
-                }
+        for (int i = 0; i < pixels.length; i++) {
+            if (selected[i]) {
+                pixels[i] = Color.TRANSPARENT;
             }
         }
 
-        work.setPixels(pixels, 0, w, 0, 0, w, h);
+        if (edgeSoftness <= 0) return;
+
+        int radius = 1 + edgeSoftness / 25;
+        float strength = Math.min(0.85f, edgeSoftness / 100f);
+
+        for (int y = radius; y < h - radius; y++) {
+            for (int x = radius; x < w - radius; x++) {
+                int index = y * w + x;
+
+                if (selected[index]) continue;
+                if (hasRectLimit && !limitRect.contains(x, y)) continue;
+
+                int nearCount = 0;
+                int total = 0;
+
+                for (int yy = -radius; yy <= radius; yy++) {
+                    for (int xx = -radius; xx <= radius; xx++) {
+                        if (xx == 0 && yy == 0) continue;
+
+                        int ni = (y + yy) * w + (x + xx);
+                        total++;
+
+                        if (selected[ni]) {
+                            nearCount++;
+                        }
+                    }
+                }
+
+                if (nearCount > 0) {
+                    int p = originalPixels[index];
+
+                    int alpha = Color.alpha(p);
+                    float coverage = nearCount / (float) total;
+                    int newAlpha = (int) (alpha * (1f - coverage * strength));
+
+                    newAlpha = Math.max(0, Math.min(255, newAlpha));
+                    pixels[index] = Color.argb(newAlpha, Color.red(p), Color.green(p), Color.blue(p));
+                }
+            }
+        }
     }
 
     private void add(ArrayDeque<Integer> queue, boolean[] seen, int x, int y, int w, int h) {
@@ -624,4 +637,4 @@ public class EditorCanvasView extends View {
     private float sp(int value) {
         return value * getResources().getDisplayMetrics().scaledDensity;
     }
-                }
+            }
