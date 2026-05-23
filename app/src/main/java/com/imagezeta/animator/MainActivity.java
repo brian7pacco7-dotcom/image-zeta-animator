@@ -17,7 +17,6 @@ import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.SeekBar;
 import android.widget.Toast;
@@ -30,31 +29,31 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    private static final int PICK_IMAGE = 100;
+    private static final int PICK_IMAGE = 77;
 
     private final int BLUE = Color.rgb(20, 105, 245);
     private final int DARK = Color.rgb(12, 24, 54);
     private final int BG = Color.rgb(246, 249, 255);
-    private final int TEXT = Color.rgb(55, 65, 85);
 
-    private LinearLayout root;
     private CutEditorView editor;
     private TextView sizeInfo;
+    private TextView modeInfo;
     private TextView brushInfo;
+    private TextView toleranceInfo;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        showEditor();
+        buildScreen();
     }
 
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    private TextView text(String value, int sp, int color, int style) {
+    private TextView text(String s, int sp, int color, int style) {
         TextView t = new TextView(this);
-        t.setText(value);
+        t.setText(s);
         t.setTextSize(sp);
         t.setTextColor(color);
         t.setTypeface(Typeface.DEFAULT, style);
@@ -68,182 +67,138 @@ public class MainActivity extends Activity {
         return g;
     }
 
-    private GradientDrawable cardBg() {
-        GradientDrawable g = bg(Color.WHITE, 20);
+    private GradientDrawable card() {
+        GradientDrawable g = bg(Color.WHITE, 16);
         g.setStroke(dp(1), Color.rgb(220, 230, 245));
         return g;
     }
 
-    private Button button(String label, int color, int textColor) {
+    private Button btn(String s, int color, int textColor) {
         Button b = new Button(this);
-        b.setText(label);
+        b.setText(s);
         b.setAllCaps(false);
-        b.setTextSize(13);
+        b.setTextSize(12);
         b.setTextColor(textColor);
         b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        b.setBackground(bg(color, 16));
+        b.setBackground(bg(color, 14));
         return b;
     }
 
-    private TextView chip(String value) {
-        TextView c = text(value, 12, BLUE, Typeface.BOLD);
-        c.setGravity(Gravity.CENTER);
-        c.setPadding(dp(10), dp(8), dp(10), dp(8));
-        c.setBackground(cardBg());
-        return c;
-    }
-
-    private void showEditor() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-
-        root = new LinearLayout(this);
+    private void buildScreen() {
+        LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(14), dp(18), dp(14), dp(18));
+        root.setPadding(dp(10), dp(10), dp(10), dp(10));
         root.setBackgroundColor(BG);
+        setContentView(root);
 
-        scroll.addView(root, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-
-        setContentView(scroll);
-
-        TextView title = text("Image Zeta Background Remover", 21, DARK, Typeface.BOLD);
+        TextView title = text("Image Zeta Background Remover", 18, DARK, Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
-        root.addView(title);
+        root.addView(title, new LinearLayout.LayoutParams(-1, dp(34)));
 
-        TextView subtitle = text("Extrae fondo, corrige bordes y exporta PNG sin perder tamaño.", 14, TEXT, Typeface.NORMAL);
-        subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, dp(6), 0, dp(14));
-        root.addView(subtitle);
-
-        LinearLayout chips = new LinearLayout(this);
-        chips.setOrientation(LinearLayout.HORIZONTAL);
-        chips.setPadding(0, 0, 0, dp(10));
-        root.addView(chips);
-
-        sizeInfo = chip("Tamaño original: abre imagen");
-        chips.addView(sizeInfo, new LinearLayout.LayoutParams(0, dp(46), 1));
-
-        TextView quality = chip("Calidad: original");
-        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(0, dp(46), 1);
-        qlp.setMargins(dp(8), 0, 0, 0);
-        chips.addView(quality, qlp);
+        sizeInfo = text("Tamaño original: abre imagen", 12, BLUE, Typeface.BOLD);
+        sizeInfo.setGravity(Gravity.CENTER);
+        sizeInfo.setBackground(card());
+        root.addView(sizeInfo, new LinearLayout.LayoutParams(-1, dp(38)));
 
         editor = new CutEditorView(this);
-        editor.setBackground(cardBg());
+        editor.setBackground(card());
         root.addView(editor, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(470)
+                0,
+                1
         ));
 
-        TextView help = text("Zoom: 2 dedos. Mover: 2 dedos. Borrar/restaurar: 1 dedo.", 12, TEXT, Typeface.BOLD);
-        help.setGravity(Gravity.CENTER);
-        help.setPadding(0, dp(8), 0, dp(8));
-        root.addView(help);
+        modeInfo = text("Modo: borrador suave | Zoom y mover: 2 dedos", 12, DARK, Typeface.BOLD);
+        modeInfo.setGravity(Gravity.CENTER);
+        modeInfo.setPadding(0, dp(5), 0, dp(5));
+        root.addView(modeInfo, new LinearLayout.LayoutParams(-1, dp(36)));
 
-        LinearLayout mainActions = new LinearLayout(this);
-        mainActions.setOrientation(LinearLayout.HORIZONTAL);
-        root.addView(mainActions);
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        root.addView(row1, new LinearLayout.LayoutParams(-1, dp(52)));
 
-        Button open = button("Abrir imagen", Color.WHITE, BLUE);
+        Button open = btn("Abrir", Color.WHITE, BLUE);
         open.setOnClickListener(v -> openImage());
-        mainActions.addView(open, new LinearLayout.LayoutParams(0, dp(54), 1));
+        row1.addView(open, new LinearLayout.LayoutParams(0, -1, 1));
 
-        Button auto = button("Auto quitar fondo", BLUE, Color.WHITE);
-        auto.setOnClickListener(v -> {
-            if (editor.hasImage()) {
-                editor.autoRemoveBackground();
-            } else {
-                toast("Primero abre una imagen.");
-            }
+        Button magic = btn("Varita", Color.WHITE, DARK);
+        magic.setOnClickListener(v -> {
+            editor.setMode(CutEditorView.MODE_MAGIC);
+            modeInfo.setText("Modo: varita | toca el fondo para borrar zona similar");
         });
+        row1.addView(magic, new LinearLayout.LayoutParams(0, -1, 1));
 
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(0, dp(54), 1);
-        alp.setMargins(dp(8), 0, 0, 0);
-        mainActions.addView(auto, alp);
-
-        LinearLayout tools = new LinearLayout(this);
-        tools.setOrientation(LinearLayout.HORIZONTAL);
-        tools.setPadding(0, dp(10), 0, 0);
-        root.addView(tools);
-
-        Button eraseSoft = button("Borrador suave", Color.WHITE, DARK);
-        eraseSoft.setOnClickListener(v -> {
+        Button soft = btn("Suave", Color.WHITE, DARK);
+        soft.setOnClickListener(v -> {
             editor.setMode(CutEditorView.MODE_ERASE_SOFT);
-            toast("Borrador suave activo.");
+            modeInfo.setText("Modo: borrador suave");
         });
-        tools.addView(eraseSoft, new LinearLayout.LayoutParams(0, dp(58), 1));
+        row1.addView(soft, new LinearLayout.LayoutParams(0, -1, 1));
 
-        Button eraseHard = button("Borrador duro", Color.WHITE, DARK);
-        eraseHard.setOnClickListener(v -> {
+        Button hard = btn("Duro", Color.WHITE, DARK);
+        hard.setOnClickListener(v -> {
             editor.setMode(CutEditorView.MODE_ERASE_HARD);
-            toast("Borrador duro activo.");
+            modeInfo.setText("Modo: borrador duro");
         });
+        row1.addView(hard, new LinearLayout.LayoutParams(0, -1, 1));
 
-        LinearLayout.LayoutParams ehlp = new LinearLayout.LayoutParams(0, dp(58), 1);
-        ehlp.setMargins(dp(8), 0, 0, 0);
-        tools.addView(eraseHard, ehlp);
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        row2.setPadding(0, dp(6), 0, 0);
+        root.addView(row2, new LinearLayout.LayoutParams(-1, dp(58)));
 
-        Button restore = button("Restaurar", Color.WHITE, DARK);
+        Button restore = btn("Restaurar", Color.WHITE, DARK);
         restore.setOnClickListener(v -> {
             editor.setMode(CutEditorView.MODE_RESTORE);
-            toast("Restaurar activo.");
+            modeInfo.setText("Modo: restaurar partes borradas");
         });
+        row2.addView(restore, new LinearLayout.LayoutParams(0, -1, 1));
 
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(0, dp(58), 1);
-        rlp.setMargins(dp(8), 0, 0, 0);
-        tools.addView(restore, rlp);
-
-        LinearLayout tools2 = new LinearLayout(this);
-        tools2.setOrientation(LinearLayout.HORIZONTAL);
-        tools2.setPadding(0, dp(10), 0, 0);
-        root.addView(tools2);
-
-        Button undo = button("Deshacer", Color.WHITE, DARK);
+        Button undo = btn("Deshacer", Color.WHITE, DARK);
         undo.setOnClickListener(v -> editor.undo());
-        tools2.addView(undo, new LinearLayout.LayoutParams(0, dp(54), 1));
+        row2.addView(undo, new LinearLayout.LayoutParams(0, -1, 1));
 
-        Button fit = button("Ajustar vista", Color.WHITE, DARK);
+        Button fit = btn("Ajustar", Color.WHITE, DARK);
         fit.setOnClickListener(v -> editor.resetView());
+        row2.addView(fit, new LinearLayout.LayoutParams(0, -1, 1));
 
-        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(0, dp(54), 1);
-        flp.setMargins(dp(8), 0, 0, 0);
-        tools2.addView(fit, flp);
-
-        brushInfo = text("Tamaño de pincel: 35", 13, DARK, Typeface.BOLD);
-        brushInfo.setPadding(0, dp(14), 0, dp(4));
-        root.addView(brushInfo);
-
-        SeekBar brushBar = new SeekBar(this);
-        brushBar.setMax(100);
-        brushBar.setProgress(35);
-        brushBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int size = Math.max(5, progress);
-                editor.setBrushSize(size);
-                brushInfo.setText("Tamaño de pincel: " + size);
-            }
-
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-
-        root.addView(brushBar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
-        ));
-
-        Button export = button("Exportar PNG transparente", BLUE, Color.WHITE);
-        LinearLayout.LayoutParams xlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(62)
-        );
-        xlp.setMargins(0, dp(12), 0, 0);
-        root.addView(export, xlp);
+        Button export = btn("Exportar PNG", BLUE, Color.WHITE);
         export.setOnClickListener(v -> savePng());
+        row2.addView(export, new LinearLayout.LayoutParams(0, -1, 1));
+
+        brushInfo = text("Pincel: 35", 12, DARK, Typeface.BOLD);
+        root.addView(brushInfo, new LinearLayout.LayoutParams(-1, dp(28)));
+
+        SeekBar brush = new SeekBar(this);
+        brush.setMax(120);
+        brush.setProgress(35);
+        brush.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
+                int value = Math.max(5, progress);
+                editor.setBrushSize(value);
+                brushInfo.setText("Pincel: " + value);
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(brush, new LinearLayout.LayoutParams(-1, dp(44)));
+
+        toleranceInfo = text("Tolerancia varita: 45", 12, DARK, Typeface.BOLD);
+        root.addView(toleranceInfo, new LinearLayout.LayoutParams(-1, dp(28)));
+
+        SeekBar tolerance = new SeekBar(this);
+        tolerance.setMax(120);
+        tolerance.setProgress(45);
+        tolerance.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
+                int value = Math.max(5, progress);
+                editor.setTolerance(value);
+                toleranceInfo.setText("Tolerancia varita: " + value);
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        root.addView(tolerance, new LinearLayout.LayoutParams(-1, dp(44)));
     }
 
     private void openImage() {
@@ -258,13 +213,10 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
 
-        if (request != PICK_IMAGE || result != RESULT_OK || data == null || data.getData() == null) {
-            return;
-        }
+        if (request != PICK_IMAGE || result != RESULT_OK || data == null || data.getData() == null) return;
 
         try {
             Bitmap bitmap = loadBitmap(data.getData());
-
             if (bitmap == null) {
                 toast("No se pudo abrir la imagen.");
                 return;
@@ -272,8 +224,7 @@ public class MainActivity extends Activity {
 
             editor.setImage(bitmap);
             sizeInfo.setText("Tamaño original: " + bitmap.getWidth() + " × " + bitmap.getHeight());
-            toast("Imagen cargada sin cambiar tamaño.");
-
+            toast("Imagen cargada.");
         } catch (Exception e) {
             toast("Error al abrir imagen.");
         }
@@ -281,15 +232,11 @@ public class MainActivity extends Activity {
 
     private Bitmap loadBitmap(Uri uri) throws Exception {
         InputStream input = getContentResolver().openInputStream(uri);
-
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-
         Bitmap bitmap = BitmapFactory.decodeStream(input, null, options);
-
         if (input != null) input.close();
         if (bitmap == null) return null;
-
         return bitmap.copy(Bitmap.Config.ARGB_8888, true);
     }
 
@@ -311,23 +258,19 @@ public class MainActivity extends Activity {
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.put(
-                        MediaStore.Images.Media.RELATIVE_PATH,
-                        Environment.DIRECTORY_PICTURES + "/Image Zeta Background Remover"
-                );
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/Image Zeta Background Remover");
                 values.put(MediaStore.Images.Media.IS_PENDING, 1);
             }
 
             Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-
             if (uri == null) {
-                toast("No se pudo crear el PNG.");
+                toast("No se pudo crear PNG.");
                 return;
             }
 
             OutputStream output = getContentResolver().openOutputStream(uri);
             outputBitmap.compress(Bitmap.CompressFormat.PNG, 100, output);
-
             if (output != null) output.close();
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -336,8 +279,7 @@ public class MainActivity extends Activity {
                 getContentResolver().update(uri, values, null, null);
             }
 
-            toast("PNG guardado sin perder tamaño original.");
-
+            toast("PNG guardado sin cambiar tamaño.");
         } catch (Exception e) {
             toast("Error al guardar PNG.");
         }
@@ -346,4 +288,4 @@ public class MainActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
-                              }
+                               }
