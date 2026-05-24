@@ -32,7 +32,7 @@ public class EditorCanvasView extends View {
     private boolean lassoReady = false;
     private boolean processingMagic = false;
 
-    private Path lassoPath = new Path();
+    private final Path lassoPath = new Path();
 
     private float scale = 1f;
     private float minScale = 0.2f;
@@ -62,7 +62,6 @@ public class EditorCanvasView extends View {
 
     private final ArrayList<Bitmap> undoStack = new ArrayList<>();
     private final ArrayList<Bitmap> redoStack = new ArrayList<>();
-
     private static final int MAX_HISTORY = 12;
 
     public EditorCanvasView(Context context) {
@@ -104,7 +103,6 @@ public class EditorCanvasView extends View {
 
         undoStack.clear();
         redoStack.clear();
-
         clearLasso();
 
         scale = 1f;
@@ -173,7 +171,6 @@ public class EditorCanvasView extends View {
 
         if (undoStack.size() > MAX_HISTORY) {
             Bitmap old = undoStack.remove(0);
-
             if (old != null && !old.isRecycled()) {
                 old.recycle();
             }
@@ -357,7 +354,6 @@ public class EditorCanvasView extends View {
         float sy = event.getY();
 
         switch (action) {
-
             case MotionEvent.ACTION_DOWN:
                 downX = sx;
                 downY = sy;
@@ -725,4 +721,31 @@ public class EditorCanvasView extends View {
 
         Paint clearPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         clearPaint.setStyle(Paint.Style.FILL);
-        clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.C
+        clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+
+        if (edgeSoftness > 0) {
+            clearPaint.setMaskFilter(new BlurMaskFilter(edgeSoftness, BlurMaskFilter.Blur.NORMAL));
+        }
+
+        workCanvas.drawPath(lassoPath, clearPaint);
+
+        clearLasso();
+        invalidate();
+
+        return true;
+    }
+
+    private void clearLasso() {
+        lassoPath.reset();
+        lassoReady = false;
+    }
+
+    private boolean isInsideBitmap(float x, float y) {
+        if (workBitmap == null) return false;
+
+        return x >= 0 &&
+                y >= 0 &&
+                x < workBitmap.getWidth() &&
+                y < workBitmap.getHeight();
+    }
+}
