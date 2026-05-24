@@ -1,491 +1,412 @@
 package com.imagezeta.animator;
 
+import android.Manifest;
 import android.app.Activity;
-import android.os.Bundle;
+import android.content.ContentValues;
 import android.content.Intent;
-import android.net.Uri;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.MediaStore;
 import android.view.Gravity;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.SeekBar;
 import android.widget.Switch;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
 import java.io.InputStream;
-import java.util.Locale;
+import java.io.OutputStream;
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
-    private static final int PICK_IMAGE = 100;
-
-    private final int DARK_BG = Color.rgb(48, 48, 48);
-    private final int PANEL_BG = Color.argb(225, 20, 20, 20);
-    private final int TOOL_BG = Color.argb(145, 70, 70, 70);
-    private final int BLUE = Color.rgb(20, 105, 245);
-    private final int WHITE = Color.WHITE;
-
-    private FrameLayout root;
     private EditorCanvasView editor;
-
-    private LinearLayout rightPanel;
-    private Button panelToggle;
-
     private TextView zoomText;
-    private TextView brushValue;
-    private TextView toleranceValue;
-    private TextView softnessValue;
+    private TextView toolText;
+    private TextView sizeText;
+    private TextView toleranceText;
+    private TextView softnessText;
 
-    private Button softBtn;
-    private Button hardBtn;
-    private Button restoreBtn;
-    private Button magicBtn;
+    private Button moveButton;
+    private Button softButton;
+    private Button hardButton;
+    private Button restoreButton;
+    private Button magicButton;
+    private Button zoneButton;
+    private Button clearZoneButton;
+    private Button backgroundButton;
+
+    private int currentTool = EditorCanvasView.TOOL_ERASE_SOFT;
+    private boolean magicEnabled = false;
+
+    private final ActivityResultLauncher<Intent> imagePicker = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                    Uri uri = result.getData().getData();
+                    if (uri != null) {
+                        loadImage(uri);
+                    }
+                }
+            }
+    );
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        buildEditorScreen();
-    }
 
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
-    }
+        requestPermissionIfNeeded();
 
-    private GradientDrawable roundBg(int color, int radius) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(dp(radius));
-        return g;
-    }
-
-    private GradientDrawable circleBg(int color) {
-        GradientDrawable g = new GradientDrawable();
-        g.setShape(GradientDrawable.OVAL);
-        g.setColor(color);
-        g.setStroke(dp(1), Color.argb(100, 255, 255, 255));
-        return g;
-    }
-
-    private TextView label(String text, int sp, int color, int style) {
-        TextView v = new TextView(this);
-        v.setText(text);
-        v.setTextSize(sp);
-        v.setTextColor(color);
-        v.setTypeface(Typeface.DEFAULT, style);
-        v.setGravity(Gravity.CENTER);
-        return v;
-    }
-
-    private Button iconButton(String text) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextSize(20);
-        b.setTextColor(WHITE);
-        b.setAllCaps(false);
-        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        b.setBackground(circleBg(TOOL_BG));
-        b.setPadding(0, 0, 0, 0);
-        return b;
-    }
-
-    private Button toolButton(String text) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextSize(11);
-        b.setTextColor(WHITE);
-        b.setAllCaps(false);
-        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        b.setBackground(roundBg(Color.argb(120, 60, 60, 60), 12));
-        return b;
-    }
-
-    private void buildEditorScreen() {
-        root = new FrameLayout(this);
-        root.setBackgroundColor(DARK_BG);
-        setContentView(root);
+        FrameLayout root = new FrameLayout(this);
 
         editor = new EditorCanvasView(this);
-        editor.setBackgroundColor(DARK_BG);
-
         root.addView(editor, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        editor.setZoomListener(percent -> runOnUiThread(() -> {
-            zoomText.setText(String.format(Locale.US, "%.1f%%", percent));
-            zoomText.setVisibility(View.VISIBLE);
-            zoomText.removeCallbacks(hideZoomRunnable);
-            zoomText.postDelayed(hideZoomRunnable, 850);
-        }));
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(8), dp(8), dp(8), dp(8));
+        panel.setBackgroundColor(0xCC111111);
 
-        addTopBar();
-        addRightPanel();
-        addPanelToggle();
-    }
-
-    private final Runnable hideZoomRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (zoomText != null) {
-                zoomText.setVisibility(View.GONE);
-            }
-        }
-    };
-
-    private void addTopBar() {
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(8), dp(8), dp(8), dp(4));
-
-        FrameLayout.LayoutParams topLp = new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(64)
+                ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        topLp.gravity = Gravity.TOP;
-        root.addView(top, topLp);
+        panelParams.gravity = Gravity.BOTTOM;
+        root.addView(panel, panelParams);
 
-        Button undo = iconButton("↶");
-        undo.setOnClickListener(v -> editor.undo());
-        top.addView(undo, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        zoomText = makeLabel("Zoom: 100%");
+        toolText = makeLabel("Herramienta: Borrador suave");
 
-        Button redo = iconButton("↷");
-        redo.setOnClickListener(v -> editor.redo());
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        rlp.setMargins(dp(8), 0, 0, 0);
-        top.addView(redo, rlp);
+        panel.addView(zoomText);
+        panel.addView(toolText);
 
-        TextView spacer = new TextView(this);
-        top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        scroll.addView(buttons);
+        panel.addView(scroll);
 
-        Button magicTop = iconButton("✦");
-        magicTop.setOnClickListener(v -> selectTool(EditorCanvasView.TOOL_MAGIC));
-        top.addView(magicTop, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        Button openButton = makeButton("Abrir");
+        openButton.setOnClickListener(v -> openImagePicker());
+        buttons.addView(openButton);
 
-        Button rect = iconButton("□");
-        rect.setOnClickListener(v -> {
-            editor.setTool(EditorCanvasView.TOOL_RECT);
-            resetToolButtons();
-            toast("Modo cuadro: dibuja un cuadro para limitar la varita.");
+        moveButton = makeButton("Mover");
+        moveButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_MOVE));
+        buttons.addView(moveButton);
+
+        softButton = makeButton("Borrar suave");
+        softButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_ERASE_SOFT));
+        buttons.addView(softButton);
+
+        hardButton = makeButton("Borrar duro");
+        hardButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_ERASE_HARD));
+        buttons.addView(hardButton);
+
+        restoreButton = makeButton("Restaurar");
+        restoreButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_RESTORE));
+        buttons.addView(restoreButton);
+
+        magicButton = makeButton("Varita OFF");
+        magicButton.setOnClickListener(v -> toggleMagic());
+        buttons.addView(magicButton);
+
+        zoneButton = makeButton("Zona");
+        zoneButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_RECT));
+        buttons.addView(zoneButton);
+
+        clearZoneButton = makeButton("Limpiar zona");
+        clearZoneButton.setOnClickListener(v -> editor.clearMagicMask());
+        buttons.addView(clearZoneButton);
+
+        backgroundButton = makeButton("Fondo");
+        backgroundButton.setOnClickListener(v -> {
+            String name = editor.cycleTransparencyBackground();
+            Toast.makeText(this, name, Toast.LENGTH_SHORT).show();
         });
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        slp.setMargins(dp(8), 0, 0, 0);
-        top.addView(rect, slp);
+        buttons.addView(backgroundButton);
 
-        Button hand = iconButton("☝");
-        hand.setOnClickListener(v -> {
-            editor.setTool(EditorCanvasView.TOOL_MOVE);
-            resetToolButtons();
-            toast("Mover/zoom activo.");
-        });
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        hlp.setMargins(dp(8), 0, 0, 0);
-        top.addView(hand, hlp);
+        Button undoButton = makeButton("Deshacer");
+        undoButton.setOnClickListener(v -> editor.undo());
+        buttons.addView(undoButton);
 
-        Button importImg = iconButton("▣");
-        importImg.setOnClickListener(v -> openImage());
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        ilp.setMargins(dp(8), 0, 0, 0);
-        top.addView(importImg, ilp);
+        Button redoButton = makeButton("Rehacer");
+        redoButton.setOnClickListener(v -> editor.redo());
+        buttons.addView(redoButton);
 
-        Button export = iconButton("⇧");
-        export.setOnClickListener(v -> savePng());
-        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        elp.setMargins(dp(8), 0, 0, 0);
-        top.addView(export, elp);
+        Button resetButton = makeButton("Reset vista");
+        resetButton.setOnClickListener(v -> editor.resetView());
+        buttons.addView(resetButton);
 
-        zoomText = label("100%", 18, WHITE, Typeface.BOLD);
-        zoomText.setBackground(roundBg(Color.argb(215, 0, 0, 0), 8));
-        zoomText.setVisibility(View.GONE);
+        Button saveButton = makeButton("Guardar PNG");
+        saveButton.setOnClickListener(v -> saveImage());
+        buttons.addView(saveButton);
 
-        FrameLayout.LayoutParams zlp = new FrameLayout.LayoutParams(dp(150), dp(56));
-        zlp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        zlp.topMargin = dp(12);
-        root.addView(zoomText, zlp);
-    }
+        sizeText = makeLabel("Tamaño: 35");
+        panel.addView(sizeText);
 
-    private void addRightPanel() {
-        rightPanel = new LinearLayout(this);
-        rightPanel.setOrientation(LinearLayout.VERTICAL);
-        rightPanel.setPadding(dp(8), dp(10), dp(8), dp(10));
-        rightPanel.setBackground(roundBg(PANEL_BG, 12));
-
-        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(dp(152), ViewGroup.LayoutParams.WRAP_CONTENT);
-        plp.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
-        plp.rightMargin = dp(8);
-        root.addView(rightPanel, plp);
-
-        TextView title = label("Herramienta", 15, WHITE, Typeface.BOLD);
-        title.setGravity(Gravity.LEFT);
-        rightPanel.addView(title, new LinearLayout.LayoutParams(-1, dp(32)));
-
-        LinearLayout row1 = new LinearLayout(this);
-        row1.setOrientation(LinearLayout.HORIZONTAL);
-        rightPanel.addView(row1, new LinearLayout.LayoutParams(-1, dp(58)));
-
-        softBtn = toolButton("Suave");
-        softBtn.setOnClickListener(v -> selectTool(EditorCanvasView.TOOL_ERASE_SOFT));
-        row1.addView(softBtn, new LinearLayout.LayoutParams(0, -1, 1));
-
-        hardBtn = toolButton("Duro");
-        hardBtn.setOnClickListener(v -> selectTool(EditorCanvasView.TOOL_ERASE_HARD));
-        LinearLayout.LayoutParams hardLp = new LinearLayout.LayoutParams(0, -1, 1);
-        hardLp.setMargins(dp(6), 0, 0, 0);
-        row1.addView(hardBtn, hardLp);
-
-        LinearLayout row2 = new LinearLayout(this);
-        row2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams row2Lp = new LinearLayout.LayoutParams(-1, dp(58));
-        row2Lp.setMargins(0, dp(6), 0, dp(8));
-        rightPanel.addView(row2, row2Lp);
-
-        restoreBtn = toolButton("Restaurar");
-        restoreBtn.setOnClickListener(v -> selectTool(EditorCanvasView.TOOL_RESTORE));
-        row2.addView(restoreBtn, new LinearLayout.LayoutParams(0, -1, 1));
-
-        magicBtn = toolButton("Varita");
-        magicBtn.setOnClickListener(v -> selectTool(EditorCanvasView.TOOL_MAGIC));
-        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(0, -1, 1);
-        wlp.setMargins(dp(6), 0, 0, 0);
-        row2.addView(magicBtn, wlp);
-
-        addPanelDivider(rightPanel);
-
-        brushValue = label("Tamaño: 35", 13, WHITE, Typeface.BOLD);
-        brushValue.setGravity(Gravity.LEFT);
-        rightPanel.addView(brushValue, new LinearLayout.LayoutParams(-1, dp(30)));
-
-        SeekBar brush = new SeekBar(this);
-        brush.setMax(180);
-        brush.setProgress(35);
-        brush.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
+        SeekBar sizeSeek = new SeekBar(this);
+        sizeSeek.setMax(150);
+        sizeSeek.setProgress(35);
+        sizeSeek.setOnSeekBarChangeListener(new SimpleSeekBar() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int value = Math.max(1, progress);
+                sizeText.setText("Tamaño: " + value);
                 editor.setBrushSize(value);
-                brushValue.setText("Tamaño: " + value);
             }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
         });
-        rightPanel.addView(brush, new LinearLayout.LayoutParams(-1, dp(42)));
+        panel.addView(sizeSeek);
 
-        toleranceValue = label("Tolerancia: 60", 13, WHITE, Typeface.BOLD);
-        toleranceValue.setGravity(Gravity.LEFT);
-        rightPanel.addView(toleranceValue, new LinearLayout.LayoutParams(-1, dp(30)));
+        toleranceText = makeLabel("Tolerancia varita: 60");
+        panel.addView(toleranceText);
 
-        SeekBar tolerance = new SeekBar(this);
-        tolerance.setMax(180);
-        tolerance.setProgress(60);
-        tolerance.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
-                int value = Math.max(5, progress);
+        SeekBar toleranceSeek = new SeekBar(this);
+        toleranceSeek.setMax(180);
+        toleranceSeek.setProgress(60);
+        toleranceSeek.setOnSeekBarChangeListener(new SimpleSeekBar() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int value = Math.max(1, progress);
+                toleranceText.setText("Tolerancia varita: " + value);
                 editor.setTolerance(value);
-                toleranceValue.setText("Tolerancia: " + value);
             }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
         });
-        rightPanel.addView(tolerance, new LinearLayout.LayoutParams(-1, dp(42)));
+        panel.addView(toleranceSeek);
 
-        softnessValue = label("Suavidad: 35%", 13, WHITE, Typeface.BOLD);
-        softnessValue.setGravity(Gravity.LEFT);
-        rightPanel.addView(softnessValue, new LinearLayout.LayoutParams(-1, dp(30)));
+        softnessText = makeLabel("Suavidad borde: 35");
+        panel.addView(softnessText);
 
-        SeekBar softness = new SeekBar(this);
-        softness.setMax(100);
-        softness.setProgress(35);
-        softness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
+        SeekBar softnessSeek = new SeekBar(this);
+        softnessSeek.setMax(100);
+        softnessSeek.setProgress(35);
+        softnessSeek.setOnSeekBarChangeListener(new SimpleSeekBar() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                softnessText.setText("Suavidad borde: " + progress);
                 editor.setEdgeSoftness(progress);
-                softnessValue.setText("Suavidad: " + progress + "%");
             }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
         });
-        rightPanel.addView(softness, new LinearLayout.LayoutParams(-1, dp(42)));
-
-        addPanelDivider(rightPanel);
-
-        LinearLayout holesRow = new LinearLayout(this);
-        holesRow.setOrientation(LinearLayout.HORIZONTAL);
-        holesRow.setGravity(Gravity.CENTER_VERTICAL);
-        rightPanel.addView(holesRow, new LinearLayout.LayoutParams(-1, dp(54)));
-
-        TextView holesText = label("Huecos", 13, WHITE, Typeface.BOLD);
-        holesText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        holesRow.addView(holesText, new LinearLayout.LayoutParams(0, -1, 1));
+        panel.addView(softnessSeek);
 
         Switch holesSwitch = new Switch(this);
+        holesSwitch.setText("Huecos / continuidad diagonal");
+        holesSwitch.setTextColor(0xFFFFFFFF);
         holesSwitch.setChecked(true);
-        holesSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> editor.setHoleRecognitionEnabled(isChecked));
-        holesRow.addView(holesSwitch, new LinearLayout.LayoutParams(dp(58), -1));
+        holesSwitch.setOnCheckedChangeListener((CompoundButton buttonView, boolean isChecked) ->
+                editor.setHoleRecognitionEnabled(isChecked)
+        );
+        panel.addView(holesSwitch);
 
-        LinearLayout rowBottom = new LinearLayout(this);
-        rowBottom.setOrientation(LinearLayout.HORIZONTAL);
-        rightPanel.addView(rowBottom, new LinearLayout.LayoutParams(-1, dp(44)));
+        editor.setZoomListener(percent ->
+                zoomText.setText("Zoom: " + Math.round(percent) + "%")
+        );
 
-        Button reset = toolButton("Reset");
-        reset.setOnClickListener(v -> editor.resetView());
-        rowBottom.addView(reset, new LinearLayout.LayoutParams(0, -1, 1));
-
-        Button clearBox = toolButton("Sin cuadro");
-        clearBox.setOnClickListener(v -> {
-            editor.clearRectLimit();
-            toast("Cuadro eliminado.");
-        });
-        LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(0, -1, 1);
-        cbLp.setMargins(dp(6), 0, 0, 0);
-        rowBottom.addView(clearBox, cbLp);
-
-        selectTool(EditorCanvasView.TOOL_ERASE_SOFT);
+        setContentView(root);
+        updateButtonStates();
     }
 
-    private void addPanelToggle() {
-        panelToggle = iconButton("›");
-        panelToggle.setTextSize(22);
-        panelToggle.setOnClickListener(v -> togglePanel());
+    private void toggleMagic() {
+        magicEnabled = !magicEnabled;
 
-        FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(dp(42), dp(42));
-        tlp.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
-        tlp.rightMargin = dp(164);
-        root.addView(panelToggle, tlp);
-    }
-
-    private void togglePanel() {
-        if (rightPanel.getVisibility() == View.VISIBLE) {
-            rightPanel.setVisibility(View.GONE);
-            panelToggle.setText("‹");
-
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) panelToggle.getLayoutParams();
-            lp.rightMargin = dp(8);
-            panelToggle.setLayoutParams(lp);
+        if (magicEnabled) {
+            setTool(EditorCanvasView.TOOL_MAGIC);
         } else {
-            rightPanel.setVisibility(View.VISIBLE);
-            panelToggle.setText("›");
-
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) panelToggle.getLayoutParams();
-            lp.rightMargin = dp(164);
-            panelToggle.setLayoutParams(lp);
+            setTool(EditorCanvasView.TOOL_MOVE);
         }
+
+        updateButtonStates();
     }
 
-    private void selectTool(int tool) {
+    private void setTool(int tool) {
+        currentTool = tool;
         editor.setTool(tool);
-        resetToolButtons();
 
-        if (tool == EditorCanvasView.TOOL_ERASE_SOFT) {
-            activateButton(softBtn);
-            toast("Borrador suave.");
+        if (tool == EditorCanvasView.TOOL_MAGIC) {
+            magicEnabled = true;
+            toolText.setText("Herramienta: Varita ON");
+        } else if (tool == EditorCanvasView.TOOL_MOVE) {
+            magicEnabled = false;
+            toolText.setText("Herramienta: Mover / Zoom normal");
+        } else if (tool == EditorCanvasView.TOOL_ERASE_SOFT) {
+            magicEnabled = false;
+            toolText.setText("Herramienta: Borrador suave");
         } else if (tool == EditorCanvasView.TOOL_ERASE_HARD) {
-            activateButton(hardBtn);
-            toast("Borrador duro.");
+            magicEnabled = false;
+            toolText.setText("Herramienta: Borrador duro");
         } else if (tool == EditorCanvasView.TOOL_RESTORE) {
-            activateButton(restoreBtn);
-            toast("Restaurar activo.");
-        } else if (tool == EditorCanvasView.TOOL_MAGIC) {
-            activateButton(magicBtn);
-            toast("Varita mágica activa.");
+            magicEnabled = false;
+            toolText.setText("Herramienta: Restaurar");
+        } else if (tool == EditorCanvasView.TOOL_RECT) {
+            magicEnabled = false;
+            toolText.setText("Herramienta: Dibujar zona de varita");
         }
+
+        updateButtonStates();
     }
 
-    private void activateButton(Button button) {
-        if (button != null) {
-            button.setBackground(roundBg(Color.argb(220, 20, 105, 245), 12));
+    private void updateButtonStates() {
+        if (magicButton != null) {
+            magicButton.setText(magicEnabled ? "Varita ON" : "Varita OFF");
         }
+
+        setButtonSelected(moveButton, currentTool == EditorCanvasView.TOOL_MOVE);
+        setButtonSelected(softButton, currentTool == EditorCanvasView.TOOL_ERASE_SOFT);
+        setButtonSelected(hardButton, currentTool == EditorCanvasView.TOOL_ERASE_HARD);
+        setButtonSelected(restoreButton, currentTool == EditorCanvasView.TOOL_RESTORE);
+        setButtonSelected(magicButton, currentTool == EditorCanvasView.TOOL_MAGIC);
+        setButtonSelected(zoneButton, currentTool == EditorCanvasView.TOOL_RECT);
     }
 
-    private void resetToolButtons() {
-        Button[] buttons = new Button[]{softBtn, hardBtn, restoreBtn, magicBtn};
-        for (Button b : buttons) {
-            if (b != null) {
-                b.setBackground(roundBg(Color.argb(120, 60, 60, 60), 12));
+    private void setButtonSelected(Button button, boolean selected) {
+        if (button == null) return;
+        button.setAlpha(selected ? 1f : 0.72f);
+    }
+
+    private TextView makeLabel(String text) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextColor(0xFFFFFFFF);
+        label.setTextSize(14);
+        label.setPadding(dp(4), dp(2), dp(4), dp(2));
+        return label;
+    }
+
+    private Button makeButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextSize(12);
+        button.setPadding(dp(8), dp(4), dp(8), dp(4));
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(dp(3), dp(3), dp(3), dp(3));
+        button.setLayoutParams(params);
+
+        return button;
+    }
+
+    private void openImagePicker() {
+        Intent intent = new Intent(
+                Intent.ACTION_PICK,
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        );
+        imagePicker.launch(intent);
+    }
+
+    private void loadImage(Uri uri) {
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            Bitmap bitmap = BitmapFactory.decodeStream(input);
+
+            if (bitmap == null) {
+                Toast.makeText(this, "No se pudo abrir la imagen.", Toast.LENGTH_SHORT).show();
+                return;
             }
+
+            editor.setImage(bitmap.copy(Bitmap.Config.ARGB_8888, true));
+            setTool(EditorCanvasView.TOOL_ERASE_SOFT);
+
+        } catch (Exception e) {
+            Toast.makeText(this, "Error al cargar imagen: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
-    private void addPanelDivider(LinearLayout panel) {
-        View line = new View(this);
-        line.setBackgroundColor(Color.argb(80, 255, 255, 255));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(1));
-        lp.setMargins(0, dp(8), 0, dp(8));
-        panel.addView(line, lp);
-    }
-
-    private void openImage() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.setType("image/*");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivityForResult(intent, PICK_IMAGE);
-    }
-
-    @Override
-    protected void onActivityResult(int request, int result, Intent data) {
-        super.onActivityResult(request, result, data);
-
-        if (request != PICK_IMAGE || result != RESULT_OK || data == null || data.getData() == null) {
+    private void saveImage() {
+        if (!editor.hasImage()) {
+            Toast.makeText(this, "Primero abre una imagen.", Toast.LENGTH_SHORT).show();
             return;
         }
 
         try {
-            Bitmap bitmap = loadBitmap(data.getData());
+            Bitmap output = editor.getOutputBitmap();
+            String fileName = "image_zeta_" + System.currentTimeMillis() + ".png";
 
-            if (bitmap == null) {
-                toast("No se pudo abrir la imagen.");
-                return;
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ImageZeta");
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
             }
 
-            editor.setImage(bitmap);
-            toast("Imagen cargada en tamaño original.");
+            Uri uri = getContentResolver().insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    values
+            );
+
+            if (uri == null) {
+                throw new Exception("No se pudo crear archivo.");
+            }
+
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) {
+                    throw new Exception("No se pudo escribir archivo.");
+                }
+
+                output.compress(Bitmap.CompressFormat.PNG, 100, out);
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                getContentResolver().update(uri, values, null, null);
+            }
+
+            Toast.makeText(this, "Guardado en Pictures/ImageZeta", Toast.LENGTH_LONG).show();
 
         } catch (Exception e) {
-            toast("Error al abrir imagen.");
+            Toast.makeText(this, "Error al guardar: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
-    private Bitmap loadBitmap(Uri uri) throws Exception {
-        InputStream input = getContentResolver().openInputStream(uri);
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+    private void requestPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED) {
 
-        Bitmap bitmap = BitmapFactory.decodeStream(input, null, options);
-
-        if (input != null) input.close();
-
-        if (bitmap == null) return null;
-        return bitmap.copy(Bitmap.Config.ARGB_8888, true);
-    }
-
-    private void savePng() {
-        if (!editor.hasImage()) {
-            toast("Primero abre una imagen.");
-            return;
-        }
-
-        ImageExporter.savePng(
-                this,
-                editor.getOutputBitmap(),
-                "Image Zeta Background Remover",
-                success -> {
-                    if (success) {
-                        toast("PNG exportado sin cambiar tamaño.");
-                    } else {
-                        toast("No se pudo exportar PNG.");
-                    }
-                }
-        );
-    }
-
-    private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-    }
+                ActivityCompat.requestPermissions(
+                        this,
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        10
+                );
             }
+        }
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private abstract static class SimpleSeekBar implements SeekBar.OnSeekBarChangeListener {
+        @Override
+        public void onStartTrackingTouch(SeekBar seekBar) {
+        }
+
+        @Override
+        public void onStopTrackingTouch(SeekBar seekBar) {
+        }
+    }
+                                                 }
