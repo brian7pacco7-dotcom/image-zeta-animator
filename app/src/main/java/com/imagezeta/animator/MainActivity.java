@@ -14,6 +14,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.InputStream;
@@ -27,63 +29,139 @@ public class MainActivity extends Activity {
 
     private Button btnOpen;
     private Button btnWand;
+    private Button btnArea;
+    private Button btnApplyArea;
     private Button btnBg;
     private Button btnReset;
     private Button btnSave;
 
+    private TextView txtSize;
+    private TextView txtSoftness;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         buildLayout();
     }
 
     private void buildLayout() {
-        LinearLayout mainLayout = new LinearLayout(this);
-        mainLayout.setOrientation(LinearLayout.VERTICAL);
-        mainLayout.setBackgroundColor(Color.BLACK);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.HORIZONTAL);
+        root.setBackgroundColor(Color.BLACK);
 
-        LinearLayout topBar = new LinearLayout(this);
-        topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setGravity(Gravity.CENTER);
-        topBar.setPadding(6, 6, 6, 6);
-        topBar.setBackgroundColor(Color.rgb(40, 40, 40));
+        LinearLayout sidePanel = new LinearLayout(this);
+        sidePanel.setOrientation(LinearLayout.VERTICAL);
+        sidePanel.setGravity(Gravity.CENTER_HORIZONTAL);
+        sidePanel.setPadding(6, 8, 6, 8);
+        sidePanel.setBackgroundColor(Color.rgb(25, 25, 25));
 
         btnOpen = new Button(this);
-        btnOpen.setText("Abrir");
+        btnOpen.setText("ABRIR");
 
         btnWand = new Button(this);
-        btnWand.setText("Varita OFF");
+        btnWand.setText("VARITA\nOFF");
+
+        btnArea = new Button(this);
+        btnArea.setText("ÁREA\nOFF");
+
+        btnApplyArea = new Button(this);
+        btnApplyArea.setText("BORRAR\nÁREA");
 
         btnBg = new Button(this);
-        btnBg.setText("Fondo");
+        btnBg.setText("FONDO");
 
         btnReset = new Button(this);
-        btnReset.setText("Reset");
+        btnReset.setText("RESET");
 
         btnSave = new Button(this);
-        btnSave.setText("Guardar");
+        btnSave.setText("GUARDAR");
 
-        topBar.addView(btnOpen, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        topBar.addView(btnWand, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        topBar.addView(btnBg, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        topBar.addView(btnReset, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        topBar.addView(btnSave, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView title = new TextView(this);
+        title.setText("CONFIG");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(13f);
+        title.setGravity(Gravity.CENTER);
+
+        txtSize = new TextView(this);
+        txtSize.setTextColor(Color.WHITE);
+        txtSize.setTextSize(11f);
+        txtSize.setGravity(Gravity.CENTER);
+        txtSize.setText("Tamaño\n45");
+
+        SeekBar seekSize = new SeekBar(this);
+        seekSize.setMax(140);
+        seekSize.setProgress(35);
+
+        txtSoftness = new TextView(this);
+        txtSoftness.setTextColor(Color.WHITE);
+        txtSoftness.setTextSize(11f);
+        txtSoftness.setGravity(Gravity.CENTER);
+        txtSoftness.setText("Suavidad\n3");
+
+        SeekBar seekSoftness = new SeekBar(this);
+        seekSoftness.setMax(20);
+        seekSoftness.setProgress(3);
+
+        addPanelView(sidePanel, btnOpen);
+        addPanelView(sidePanel, btnWand);
+        addPanelView(sidePanel, btnArea);
+        addPanelView(sidePanel, btnApplyArea);
+        addPanelView(sidePanel, btnBg);
+        addPanelView(sidePanel, btnReset);
+        addPanelView(sidePanel, btnSave);
+        addPanelView(sidePanel, title);
+        addPanelView(sidePanel, txtSize);
+        addPanelView(sidePanel, seekSize);
+        addPanelView(sidePanel, txtSoftness);
+        addPanelView(sidePanel, seekSoftness);
 
         editorView = new EditorCanvasView(this);
 
-        mainLayout.addView(topBar, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+        root.addView(sidePanel, new LinearLayout.LayoutParams(
+                dpToPx(115),
+                LinearLayout.LayoutParams.MATCH_PARENT
         ));
 
-        mainLayout.addView(editorView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
+        root.addView(editorView, new LinearLayout.LayoutParams(
                 0,
+                LinearLayout.LayoutParams.MATCH_PARENT,
                 1
         ));
 
-        setContentView(mainLayout);
+        setContentView(root);
+
+        seekSize.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float size = 10f + progress;
+                editorView.setEraserSize(size);
+                txtSize.setText("Tamaño\n" + (int) size);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+
+        seekSoftness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                editorView.setEdgeSoftness(progress);
+                txtSoftness.setText("Suavidad\n" + progress);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
 
         btnOpen.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -98,11 +176,42 @@ public class MainActivity extends Activity {
                 editorView.toggleWand();
 
                 if (editorView.isWandEnabled()) {
-                    btnWand.setText("Varita ON");
-                    Toast.makeText(MainActivity.this, "Varita activada", Toast.LENGTH_SHORT).show();
+                    editorView.setLassoEnabled(false);
+                    btnWand.setText("VARITA\nON");
+                    btnArea.setText("ÁREA\nOFF");
+                    Toast.makeText(MainActivity.this, "Dibuja sobre la imagen para borrar", Toast.LENGTH_SHORT).show();
                 } else {
-                    btnWand.setText("Varita OFF");
-                    Toast.makeText(MainActivity.this, "Varita desactivada", Toast.LENGTH_SHORT).show();
+                    btnWand.setText("VARITA\nOFF");
+                    Toast.makeText(MainActivity.this, "Modo mover/zoom activado", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        btnArea.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                editorView.toggleLasso();
+
+                if (editorView.isLassoEnabled()) {
+                    editorView.setWandEnabled(false);
+                    btnArea.setText("ÁREA\nON");
+                    btnWand.setText("VARITA\nOFF");
+                    Toast.makeText(MainActivity.this, "Dibuja una forma cerrada", Toast.LENGTH_SHORT).show();
+                } else {
+                    btnArea.setText("ÁREA\nOFF");
+                }
+            }
+        });
+
+        btnApplyArea.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                boolean ok = editorView.applyLassoErase();
+
+                if (ok) {
+                    Toast.makeText(MainActivity.this, "Área borrada", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(MainActivity.this, "Primero dibuja un área", Toast.LENGTH_SHORT).show();
                 }
             }
         });
@@ -129,6 +238,18 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void addPanelView(LinearLayout panel, View view) {
+        panel.addView(view, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        ));
+    }
+
+    private int dpToPx(int dp) {
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
+
     private void openImage() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("image/*");
@@ -149,12 +270,7 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                InputStream inputStream = getContentResolver().openInputStream(uri);
-                Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-
-                if (inputStream != null) {
-                    inputStream.close();
-                }
+                Bitmap bitmap = decodeBitmapFromUri(uri, 2200);
 
                 if (bitmap == null) {
                     Toast.makeText(this, "No se pudo abrir la imagen", Toast.LENGTH_SHORT).show();
@@ -167,6 +283,45 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 Toast.makeText(this, "Error al abrir imagen", Toast.LENGTH_SHORT).show();
             }
+        }
+    }
+
+    private Bitmap decodeBitmapFromUri(Uri uri, int maxSize) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+
+            InputStream input1 = getContentResolver().openInputStream(uri);
+            BitmapFactory.decodeStream(input1, null, bounds);
+
+            if (input1 != null) {
+                input1.close();
+            }
+
+            int width = bounds.outWidth;
+            int height = bounds.outHeight;
+
+            int sample = 1;
+
+            while ((width / sample) > maxSize || (height / sample) > maxSize) {
+                sample *= 2;
+            }
+
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+
+            InputStream input2 = getContentResolver().openInputStream(uri);
+            Bitmap bitmap = BitmapFactory.decodeStream(input2, null, options);
+
+            if (input2 != null) {
+                input2.close();
+            }
+
+            return bitmap;
+
+        } catch (Exception e) {
+            return null;
         }
     }
 
