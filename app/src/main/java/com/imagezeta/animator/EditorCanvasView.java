@@ -43,7 +43,8 @@ public class EditorCanvasView extends View {
     private final Paint restorePaint;
     private final Paint checkerDark;
     private final Paint checkerLight;
-    private final Paint rectPaint;
+    private final Paint maskDrawPaint;
+    private final Paint maskPreviewPaint;
 
     private final Matrix matrix = new Matrix();
     private final Matrix inverse = new Matrix();
@@ -78,11 +79,20 @@ public class EditorCanvasView extends View {
 
     private boolean suppressSingleAfterMulti = false;
 
-    private boolean hasRectLimit = false;
-    private boolean drawingRect = false;
-    private float rectStartX;
-    private float rectStartY;
-    private final RectF limitRect = new RectF();
+    private Bitmap limitMask;
+    private Canvas limitMaskCanvas;
+    private boolean hasMaskLimit = false;
+    private boolean drawingMask = false;
+    private float maskLastX;
+    private float maskLastY;
+
+    private boolean pendingMagicTap = false;
+    private float magicTapX;
+    private float magicTapY;
+    private float magicDownScreenX;
+    private float magicDownScreenY;
+
+    private int transparencyMode = 0;
 
     public EditorCanvasView(Context context) {
         super(context);
@@ -91,10 +101,10 @@ public class EditorCanvasView extends View {
         imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
         checkerDark = new Paint(Paint.ANTI_ALIAS_FLAG);
-        checkerDark.setColor(Color.rgb(38, 38, 38));
+        checkerDark.setColor(Color.rgb(150, 150, 150));
 
         checkerLight = new Paint(Paint.ANTI_ALIAS_FLAG);
-        checkerLight.setColor(Color.rgb(245, 245, 245));
+        checkerLight.setColor(Color.rgb(225, 225, 225));
 
         hardErase = new Paint(Paint.ANTI_ALIAS_FLAG);
         hardErase.setStyle(Paint.Style.STROKE);
@@ -114,10 +124,14 @@ public class EditorCanvasView extends View {
         restorePaint.setStrokeCap(Paint.Cap.ROUND);
         restorePaint.setStrokeJoin(Paint.Join.ROUND);
 
-        rectPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        rectPaint.setStyle(Paint.Style.STROKE);
-        rectPaint.setStrokeWidth(4f);
-        rectPaint.setColor(Color.WHITE);
+        maskDrawPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        maskDrawPaint.setStyle(Paint.Style.STROKE);
+        maskDrawPaint.setStrokeCap(Paint.Cap.ROUND);
+        maskDrawPaint.setStrokeJoin(Paint.Join.ROUND);
+        maskDrawPaint.setColor(Color.WHITE);
+
+        maskPreviewPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        maskPreviewPaint.setAlpha(95);
 
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
@@ -126,7 +140,8 @@ public class EditorCanvasView extends View {
 
                 suppressSingleAfterMulti = true;
                 drawing = false;
-                drawingRect = false;
+                drawingMask = false;
+                pendingMagicTap = false;
 
                 float focusX = detector.getFocusX();
                 float focusY = detector.getFocusY();
@@ -171,10 +186,15 @@ public class EditorCanvasView extends View {
 
         restorePaint.setShader(new BitmapShader(original, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
 
+        limitMask = Bitmap.createBitmap(work.getWidth(), work.getHeight(), Bitmap.Config.ARGB_8888);
+        limitMask.eraseColor(Color.TRANSPARENT);
+        limitMaskCanvas = new Canvas(limitMask);
+
         undoStack.clear();
         redoStack.clear();
-        hasRectLimit = false;
-        limitRect.setEmpty();
+        hasMaskLimit = false;
+        drawingMask = false;
+        pendingMagicTap = false;
 
         post(this::resetView);
         invalidate();
@@ -184,7 +204,7 @@ public class EditorCanvasView extends View {
         tool = newTool;
 
         if (tool == TOOL_RECT) {
-            Toast.makeText(getContext(), "Dibuja un cuadro para limitar la varita.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "Dibuja con el dedo la zona donde trabajará la varita.", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -223,9 +243,27 @@ public class EditorCanvasView extends View {
     }
 
     public void clearRectLimit() {
-        hasRectLimit = false;
-        limitRect.setEmpty();
+        clearMagicMask();
+    }
+
+    public void clearMagicMask() {
+        hasMaskLimit = false;
+        drawingMask = false;
+        pendingMagicTap = false;
+        if (limitMask != null) {
+            limitMask.eraseColor(Color.TRANSPARENT);
+            limitMaskCanvas = new Canvas(limitMask);
+        }
         invalidate();
+    }
+
+    public String cycleTransparencyBackground() {
+        transparencyMode = (transparencyMode + 1) % 3;
+        invalidate();
+
+        if (transparencyMode == 1) return "Fondo blanco";
+        if (transparencyMode == 2) return "Fondo negro";
+        return "Cuadros de transparencia";
     }
 
     public void undo() {
@@ -294,28 +332,52 @@ public class EditorCanvasView extends View {
 
         buildMatrix();
         canvas.drawBitmap(work, matrix, imagePaint);
-        drawLimitRect(canvas);
+        drawMagicMask(canvas);
     }
 
     private void drawTransparentBackground(Canvas canvas) {
-        int size = Math.max(10, (int) (14 * getResources().getDisplayMetrics().density));
+        if (transparencyMode == 1) {
+            canvas.drawColor(Color.WHITE);
+            return;
+        }
 
-        for (int y = 0; y < getHeight(); y += size) {
-            for (int x = 0; x < getWidth(); x += size) {
+        if (transparencyMode == 2) {
+            canvas.drawColor(Color.BLACK);
+            return;
+        }
+
+        canvas.drawColor(Color.WHITE);
+
+        if (work == null) return;
+
+        buildMatrix();
+        canvas.save();
+        canvas.concat(matrix);
+        canvas.clipRect(0, 0, work.getWidth(), work.getHeight());
+
+        final float density = getResources().getDisplayMetrics().density;
+        int size = Math.max(6, (int) (8 * density));
+
+        Paint light = checkerLight;
+        Paint dark = checkerDark;
+        light.setColor(Color.rgb(232, 232, 232));
+        dark.setColor(Color.rgb(178, 178, 178));
+
+        for (int y = 0; y < work.getHeight(); y += size) {
+            for (int x = 0; x < work.getWidth(); x += size) {
                 boolean alt = ((x / size) + (y / size)) % 2 == 0;
-                canvas.drawRect(x, y, x + size, y + size, alt ? checkerLight : checkerDark);
+                canvas.drawRect(x, y, x + size, y + size, alt ? light : dark);
             }
         }
+
+        canvas.restore();
     }
 
-    private void drawLimitRect(Canvas canvas) {
-        if (!hasRectLimit || work == null) return;
+    private void drawMagicMask(Canvas canvas) {
+        if (!hasMaskLimit || limitMask == null || work == null) return;
 
-        RectF screenRect = new RectF(limitRect);
         buildMatrix();
-        matrix.mapRect(screenRect);
-
-        canvas.drawRect(screenRect, rectPaint);
+        canvas.drawBitmap(limitMask, matrix, maskPreviewPaint);
     }
 
     private void buildMatrix() {
@@ -341,7 +403,8 @@ public class EditorCanvasView extends View {
         if (event.getPointerCount() >= 2) {
             suppressSingleAfterMulti = true;
             drawing = false;
-            drawingRect = false;
+            drawingMask = false;
+            pendingMagicTap = false;
             handleTwoFinger(event);
             return true;
         }
@@ -425,28 +488,29 @@ public class EditorCanvasView extends View {
     }
 
     private void handleOneFinger(MotionEvent event) {
-        if (tool == TOOL_MOVE) return;
+        int action = event.getActionMasked();
+
+        if (tool == TOOL_MOVE) {
+            handleMoveTool(event);
+            return;
+        }
 
         float[] point = toBitmapPoint(event.getX(), event.getY());
         float x = point[0];
         float y = point[1];
 
         if (x < 0 || y < 0 || x >= work.getWidth() || y >= work.getHeight()) {
+            pendingMagicTap = false;
             return;
         }
 
-        int action = event.getActionMasked();
-
         if (tool == TOOL_RECT) {
-            handleRectTool(action, x, y);
+            handleMaskTool(action, x, y);
             return;
         }
 
         if (tool == TOOL_MAGIC) {
-            if (action == MotionEvent.ACTION_DOWN) {
-                saveUndo();
-                magicErase((int) x, (int) y);
-            }
+            handleMagicTouch(event, action, x, y);
             return;
         }
 
@@ -465,30 +529,80 @@ public class EditorCanvasView extends View {
         }
     }
 
-    private void handleRectTool(int action, float x, float y) {
+    private void handleMoveTool(MotionEvent event) {
+        int action = event.getActionMasked();
+
         if (action == MotionEvent.ACTION_DOWN) {
-            rectStartX = x;
-            rectStartY = y;
-            drawingRect = true;
-            hasRectLimit = true;
-            limitRect.set(x, y, x, y);
-            invalidate();
-        } else if (action == MotionEvent.ACTION_MOVE && drawingRect) {
-            limitRect.set(
-                    Math.min(rectStartX, x),
-                    Math.min(rectStartY, y),
-                    Math.max(rectStartX, x),
-                    Math.max(rectStartY, y)
-            );
+            panning = true;
+            lastPanX = event.getX();
+            lastPanY = event.getY();
+        } else if (action == MotionEvent.ACTION_MOVE && panning) {
+            float dx = event.getX() - lastPanX;
+            float dy = event.getY() - lastPanY;
+            moveX += dx;
+            moveY += dy;
+            lastPanX = event.getX();
+            lastPanY = event.getY();
+            limitMove();
             invalidate();
         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            drawingRect = false;
+            panning = false;
+        }
+    }
 
-            if (limitRect.width() < 5 || limitRect.height() < 5) {
-                hasRectLimit = false;
-                limitRect.setEmpty();
+    private void handleMagicTouch(MotionEvent event, int action, float x, float y) {
+        if (action == MotionEvent.ACTION_DOWN) {
+            pendingMagicTap = true;
+            magicTapX = x;
+            magicTapY = y;
+            magicDownScreenX = event.getX();
+            magicDownScreenY = event.getY();
+            return;
+        }
+
+        if (action == MotionEvent.ACTION_MOVE && pendingMagicTap) {
+            float dx = event.getX() - magicDownScreenX;
+            float dy = event.getY() - magicDownScreenY;
+            float cancelDistance = Math.max(10f, 10f * getResources().getDisplayMetrics().density);
+
+            if ((dx * dx) + (dy * dy) > cancelDistance * cancelDistance) {
+                pendingMagicTap = false;
             }
+            return;
+        }
 
+        if (action == MotionEvent.ACTION_UP) {
+            if (pendingMagicTap) {
+                saveUndo();
+                magicErase((int) magicTapX, (int) magicTapY);
+            }
+            pendingMagicTap = false;
+        } else if (action == MotionEvent.ACTION_CANCEL) {
+            pendingMagicTap = false;
+        }
+    }
+
+    private void handleMaskTool(int action, float x, float y) {
+        if (limitMaskCanvas == null) return;
+
+        float radius = brushSize * (work.getWidth() / 1080f);
+        radius = Math.max(8f, radius * 1.3f);
+        maskDrawPaint.setStrokeWidth(radius * 2f);
+
+        if (action == MotionEvent.ACTION_DOWN) {
+            drawingMask = true;
+            hasMaskLimit = true;
+            maskLastX = x;
+            maskLastY = y;
+            limitMaskCanvas.drawLine(x, y, x + 0.1f, y + 0.1f, maskDrawPaint);
+            invalidate();
+        } else if (action == MotionEvent.ACTION_MOVE && drawingMask) {
+            limitMaskCanvas.drawLine(maskLastX, maskLastY, x, y, maskDrawPaint);
+            maskLastX = x;
+            maskLastY = y;
+            invalidate();
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            drawingMask = false;
             invalidate();
         }
     }
@@ -513,262 +627,4 @@ public class EditorCanvasView extends View {
             workCanvas.drawLine(x1, y1, x2, y2, hardErase);
         } else if (tool == TOOL_ERASE_SOFT) {
             softErase.setStrokeWidth(strokeWidth);
-            workCanvas.drawLine(x1, y1, x2, y2, softErase);
-        } else if (tool == TOOL_RESTORE) {
-            restorePaint.setStrokeWidth(strokeWidth);
-            workCanvas.drawLine(x1, y1, x2, y2, restorePaint);
-        }
-
-        invalidate();
-    }
-
-    private void magicErase(int startX, int startY) {
-        int w = work.getWidth();
-        int h = work.getHeight();
-
-        if (hasRectLimit && !limitRect.contains(startX, startY)) {
-            Toast.makeText(getContext(), "Toca dentro del cuadro.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        int[] pixels = new int[w * h];
-        work.getPixels(pixels, 0, w, 0, 0, w, h);
-
-        int startIndex = startY * w + startX;
-        int startColor = pixels[startIndex];
-
-        if (Color.alpha(startColor) <= 8) {
-            Toast.makeText(getContext(), "Esa zona ya está transparente.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        boolean[] selected = new boolean[w * h];
-        boolean[] seen = new boolean[w * h];
-        int[] queue = new int[w * h];
-
-        int head = 0;
-        int tail = 0;
-        int selectedCount = 0;
-
-        double hardLimit = 12.0 + (tolerance * 1.45);
-        double localLimit = 10.0 + (tolerance * 0.90);
-
-        queue[tail++] = startIndex;
-        seen[startIndex] = true;
-
-        while (head < tail) {
-            int index = queue[head++];
-            int x = index % w;
-            int y = index / w;
-
-            if (hasRectLimit && !limitRect.contains(x, y)) continue;
-
-            int currentColor = pixels[index];
-            if (!isMagicSelectable(currentColor, startColor, hardLimit)) continue;
-
-            selected[index] = true;
-            selectedCount++;
-
-            tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x + 1, y, w, h, hardLimit, localLimit);
-            tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x - 1, y, w, h, hardLimit, localLimit);
-            tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x, y + 1, w, h, hardLimit, localLimit);
-            tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x, y - 1, w, h, hardLimit, localLimit);
-
-            if (holeRecognition) {
-                tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x + 1, y + 1, w, h, hardLimit * 0.86, localLimit * 0.82);
-                tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x - 1, y - 1, w, h, hardLimit * 0.86, localLimit * 0.82);
-                tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x + 1, y - 1, w, h, hardLimit * 0.86, localLimit * 0.82);
-                tail = addMagicCandidate(queue, tail, seen, pixels, index, startColor, x - 1, y + 1, w, h, hardLimit * 0.86, localLimit * 0.82);
-            }
-        }
-
-        if (selectedCount == 0) {
-            Toast.makeText(getContext(), "No se encontró una zona para borrar.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        if (holeRecognition) {
-            closeTinySelectionGaps(selected, pixels, w, h, startColor, hardLimit);
-        }
-
-        applyMagicSelection(pixels, selected, w, h);
-        work.setPixels(pixels, 0, w, 0, 0, w, h);
-        workCanvas = new Canvas(work);
-        invalidate();
-    }
-
-    private int addMagicCandidate(
-            int[] queue,
-            int tail,
-            boolean[] seen,
-            int[] pixels,
-            int parentIndex,
-            int startColor,
-            int x,
-            int y,
-            int w,
-            int h,
-            double hardLimit,
-            double localLimit
-    ) {
-        if (x < 0 || y < 0 || x >= w || y >= h) return tail;
-
-        int index = y * w + x;
-        if (seen[index]) return tail;
-        if (hasRectLimit && !limitRect.contains(x, y)) return tail;
-
-        int candidate = pixels[index];
-        if (!isMagicSelectable(candidate, startColor, hardLimit)) return tail;
-
-        double localDiff = colorDistance(candidate, pixels[parentIndex]);
-        double startDiff = colorDistance(candidate, startColor);
-
-        if (localDiff <= localLimit || startDiff <= hardLimit * 0.70) {
-            seen[index] = true;
-            queue[tail++] = index;
-        }
-
-        return tail;
-    }
-
-    private boolean isMagicSelectable(int color, int startColor, double hardLimit) {
-        int alpha = Color.alpha(color);
-        if (alpha <= 8) return false;
-
-        double diff = colorDistance(color, startColor);
-        if (diff > hardLimit) return false;
-
-        double startLuma = luma(startColor);
-        double currentLuma = luma(color);
-
-        // Protección para no comerse líneas negras del personaje cuando se toca fondo claro/gris.
-        if (startLuma > 95 && currentLuma < 45 && diff > 35) {
-            return false;
-        }
-
-        return true;
-    }
-
-    private double colorDistance(int a, int b) {
-        int dr = Color.red(a) - Color.red(b);
-        int dg = Color.green(a) - Color.green(b);
-        int db = Color.blue(a) - Color.blue(b);
-        int da = Color.alpha(a) - Color.alpha(b);
-
-        return Math.sqrt((dr * dr * 0.30) + (dg * dg * 0.59) + (db * db * 0.11)) + Math.abs(da) * 0.25;
-    }
-
-    private double luma(int color) {
-        return (Color.red(color) * 0.299) + (Color.green(color) * 0.587) + (Color.blue(color) * 0.114);
-    }
-
-    private void closeTinySelectionGaps(boolean[] selected, int[] pixels, int w, int h, int startColor, double hardLimit) {
-        boolean[] addMask = new boolean[selected.length];
-
-        for (int y = 1; y < h - 1; y++) {
-            for (int x = 1; x < w - 1; x++) {
-                int index = y * w + x;
-                if (selected[index]) continue;
-                if (hasRectLimit && !limitRect.contains(x, y)) continue;
-                if (!isMagicSelectable(pixels[index], startColor, hardLimit * 1.10)) continue;
-
-                int count = 0;
-                for (int yy = -1; yy <= 1; yy++) {
-                    for (int xx = -1; xx <= 1; xx++) {
-                        if (xx == 0 && yy == 0) continue;
-                        if (selected[(y + yy) * w + (x + xx)]) count++;
-                    }
-                }
-
-                if (count >= 7) {
-                    addMask[index] = true;
-                }
-            }
-        }
-
-        for (int i = 0; i < selected.length; i++) {
-            if (addMask[i]) selected[i] = true;
-        }
-    }
-
-    private void applyMagicSelection(int[] pixels, boolean[] selected, int w, int h) {
-        int[] originalPixels = pixels.clone();
-
-        for (int i = 0; i < pixels.length; i++) {
-            if (selected[i]) {
-                pixels[i] = Color.TRANSPARENT;
-            }
-        }
-
-        if (edgeSoftness <= 0) return;
-
-        int radius = Math.max(1, 1 + edgeSoftness / 18);
-        float strength = 0.45f + (edgeSoftness / 100f) * 0.42f;
-
-        for (int y = radius; y < h - radius; y++) {
-            for (int x = radius; x < w - radius; x++) {
-                int index = y * w + x;
-
-                if (selected[index]) continue;
-                if (hasRectLimit && !limitRect.contains(x, y)) continue;
-
-                float strongestCoverage = 0f;
-
-                for (int yy = -radius; yy <= radius; yy++) {
-                    for (int xx = -radius; xx <= radius; xx++) {
-                        if (xx == 0 && yy == 0) continue;
-
-                        int ni = (y + yy) * w + (x + xx);
-                        if (!selected[ni]) continue;
-
-                        float distance = (float) Math.sqrt((xx * xx) + (yy * yy));
-                        if (distance > radius) continue;
-
-                        float coverage = 1f - (distance / (radius + 0.001f));
-                        if (coverage > strongestCoverage) strongestCoverage = coverage;
-                    }
-                }
-
-                if (strongestCoverage > 0f) {
-                    int p = originalPixels[index];
-                    int alpha = Color.alpha(p);
-                    int newAlpha = (int) (alpha * (1f - strongestCoverage * strength));
-
-                    // Evita destruir las líneas oscuras principales del dibujo.
-                    if (luma(p) < 50 && alpha > 170) {
-                        newAlpha = Math.max(newAlpha, 165);
-                    }
-
-                    newAlpha = Math.max(0, Math.min(255, newAlpha));
-                    pixels[index] = Color.argb(newAlpha, Color.red(p), Color.green(p), Color.blue(p));
-                }
-            }
-        }
-    }
-
-    private void limitMove() {
-        if (work == null || getWidth() <= 0 || getHeight() <= 0) return;
-
-        buildMatrix();
-        RectF bounds = new RectF(0, 0, work.getWidth(), work.getHeight());
-        matrix.mapRect(bounds);
-
-        if (bounds.width() <= getWidth()) {
-            moveX += getWidth() / 2f - bounds.centerX();
-        } else {
-            if (bounds.left > 0) moveX -= bounds.left;
-            if (bounds.right < getWidth()) moveX += getWidth() - bounds.right;
-        }
-
-        if (bounds.height() <= getHeight()) {
-            moveY += getHeight() / 2f - bounds.centerY();
-        } else {
-            if (bounds.top > 0) moveY -= bounds.top;
-            if (bounds.bottom < getHeight()) moveY += getHeight() - bounds.bottom;
-        }
-    }
-
-    private float sp(int value) {
-        return value * getResources().getDisplayMetrics().scaledDensity;
-    }
-}
+            workCanvas.drawLine(x1, y1, x2, y2, s
