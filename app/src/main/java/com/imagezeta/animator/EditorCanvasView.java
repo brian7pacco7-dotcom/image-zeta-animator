@@ -12,8 +12,9 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
-import android.view.ScaleGestureDetector;
 import android.view.View;
+
+import java.util.ArrayList;
 
 public class EditorCanvasView extends View {
 
@@ -35,8 +36,9 @@ public class EditorCanvasView extends View {
     private Path lassoPath = new Path();
 
     private float scale = 1f;
-    private float minScale = 1f;
-    private float maxScale = 8f;
+    private float minScale = 0.2f;
+    private float maxScale = 10f;
+    private float rotation = 0f;
 
     private float offsetX = 0f;
     private float offsetY = 0f;
@@ -47,29 +49,38 @@ public class EditorCanvasView extends View {
     private float downY = 0f;
 
     private boolean dragging = false;
-    private boolean scaling = false;
+    private boolean multiTouch = false;
+
+    private float startDistance = 0f;
+    private float startAngle = 0f;
+    private float startScale = 1f;
+    private float startRotation = 0f;
+    private float focusBitmapX = 0f;
+    private float focusBitmapY = 0f;
 
     private int magicTolerance = 35;
     private int edgeSoftness = 2;
 
-    private ScaleGestureDetector scaleDetector;
+    private final ArrayList<Bitmap> undoStack = new ArrayList<>();
+    private final ArrayList<Bitmap> redoStack = new ArrayList<>();
+    private static final int MAX_HISTORY = 12;
 
     public EditorCanvasView(Context context) {
         super(context);
-        init(context);
+        init();
     }
 
     public EditorCanvasView(Context context, AttributeSet attrs) {
         super(context, attrs);
-        init(context);
+        init();
     }
 
     public EditorCanvasView(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
-        init(context);
+        init();
     }
 
-    private void init(Context context) {
+    private void init() {
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
         lassoPaint.setColor(Color.CYAN);
@@ -78,41 +89,8 @@ public class EditorCanvasView extends View {
         lassoPaint.setStrokeCap(Paint.Cap.ROUND);
         lassoPaint.setStrokeJoin(Paint.Join.ROUND);
 
-        lassoFillPaint.setColor(Color.argb(60, 0, 255, 255));
+        lassoFillPaint.setColor(Color.argb(55, 0, 255, 255));
         lassoFillPaint.setStyle(Paint.Style.FILL);
-
-        scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            @Override
-            public boolean onScaleBegin(ScaleGestureDetector detector) {
-                scaling = true;
-                return true;
-            }
-
-            @Override
-            public boolean onScale(ScaleGestureDetector detector) {
-                float oldScale = scale;
-
-                scale *= detector.getScaleFactor();
-
-                if (scale < minScale) scale = minScale;
-                if (scale > maxScale) scale = maxScale;
-
-                float focusX = detector.getFocusX();
-                float focusY = detector.getFocusY();
-
-                offsetX = focusX - ((focusX - offsetX) * scale / oldScale);
-                offsetY = focusY - ((focusY - offsetY) * scale / oldScale);
-
-                limitPosition();
-                invalidate();
-                return true;
-            }
-
-            @Override
-            public void onScaleEnd(ScaleGestureDetector detector) {
-                scaling = false;
-            }
-        });
     }
 
     public void setBitmap(Bitmap bitmap) {
@@ -124,7 +102,11 @@ public class EditorCanvasView extends View {
         workBitmap = fixed.copy(Bitmap.Config.ARGB_8888, true);
         workCanvas = new Canvas(workBitmap);
 
+        undoStack.clear();
+        redoStack.clear();
         clearLasso();
+
+        rotation = 0f;
 
         post(new Runnable() {
             @Override
@@ -142,56 +124,73 @@ public class EditorCanvasView extends View {
     public void resetImage() {
         if (originalBitmap == null) return;
 
+        saveState();
+
         workBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true);
         workCanvas = new Canvas(workBitmap);
+
         clearLasso();
+        rotation = 0f;
         fitImageToScreen();
         invalidate();
     }
 
-    public void rotateRight() {
-        if (workBitmap == null || originalBitmap == null) return;
+    public void undo() {
+        if (undoStack.isEmpty() || workBitmap == null) return;
 
-        Matrix matrix = new Matrix();
-        matrix.postRotate(90);
+        redoStack.add(workBitmap.copy(Bitmap.Config.ARGB_8888, true));
 
-        workBitmap = Bitmap.createBitmap(
-                workBitmap,
-                0, 0,
-                workBitmap.getWidth(),
-                workBitmap.getHeight(),
-                matrix,
-                true
-        );
-
-        originalBitmap = Bitmap.createBitmap(
-                originalBitmap,
-                0, 0,
-                originalBitmap.getWidth(),
-                originalBitmap.getHeight(),
-                matrix,
-                true
-        );
-
+        Bitmap previous = undoStack.remove(undoStack.size() - 1);
+        workBitmap = previous.copy(Bitmap.Config.ARGB_8888, true);
         workCanvas = new Canvas(workBitmap);
+
         clearLasso();
-        fitImageToScreen();
         invalidate();
+    }
+
+    public void redo() {
+        if (redoStack.isEmpty() || workBitmap == null) return;
+
+        undoStack.add(workBitmap.copy(Bitmap.Config.ARGB_8888, true));
+
+        Bitmap next = redoStack.remove(redoStack.size() - 1);
+        workBitmap = next.copy(Bitmap.Config.ARGB_8888, true);
+        workCanvas = new Canvas(workBitmap);
+
+        clearLasso();
+        invalidate();
+    }
+
+    private void saveState() {
+        if (workBitmap == null) return;
+
+        undoStack.add(workBitmap.copy(Bitmap.Config.ARGB_8888, true));
+
+        if (undoStack.size() > MAX_HISTORY) {
+            Bitmap old = undoStack.remove(0);
+            if (old != null && !old.isRecycled()) old.recycle();
+        }
+
+        redoStack.clear();
     }
 
     public void toggleWand() {
         wandEnabled = !wandEnabled;
+
         if (wandEnabled) {
             lassoEnabled = false;
         }
+
         invalidate();
     }
 
     public void setWandEnabled(boolean enabled) {
         wandEnabled = enabled;
+
         if (enabled) {
             lassoEnabled = false;
         }
+
         invalidate();
     }
 
@@ -201,19 +200,23 @@ public class EditorCanvasView extends View {
 
     public void toggleLasso() {
         lassoEnabled = !lassoEnabled;
+
         if (lassoEnabled) {
             wandEnabled = false;
             clearLasso();
         }
+
         invalidate();
     }
 
     public void setLassoEnabled(boolean enabled) {
         lassoEnabled = enabled;
+
         if (enabled) {
             wandEnabled = false;
             clearLasso();
         }
+
         invalidate();
     }
 
@@ -228,13 +231,15 @@ public class EditorCanvasView extends View {
 
     public void setMagicTolerance(int tolerance) {
         if (tolerance < 5) tolerance = 5;
-        if (tolerance > 100) tolerance = 100;
+        if (tolerance > 150) tolerance = 150;
+
         magicTolerance = tolerance;
     }
 
     public void setEdgeSoftness(int softness) {
         if (softness < 0) softness = 0;
-        if (softness > 10) softness = 10;
+        if (softness > 20) softness = 20;
+
         edgeSoftness = softness;
     }
 
@@ -248,12 +253,10 @@ public class EditorCanvasView extends View {
         float imgH = workBitmap.getHeight();
 
         scale = Math.min(viewW / imgW, viewH / imgH);
-        minScale = scale;
+        minScale = scale * 0.5f;
 
         offsetX = (viewW - imgW * scale) / 2f;
         offsetY = (viewH - imgH * scale) / 2f;
-
-        limitPosition();
     }
 
     @Override
@@ -271,6 +274,7 @@ public class EditorCanvasView extends View {
         if (workBitmap != null) {
             canvas.save();
             canvas.translate(offsetX, offsetY);
+            canvas.rotate(rotation);
             canvas.scale(scale, scale);
 
             canvas.drawBitmap(workBitmap, 0, 0, imagePaint);
@@ -285,23 +289,13 @@ public class EditorCanvasView extends View {
             if (processingMagic) {
                 drawProcessing(canvas);
             }
+
         } else {
             bgPaint.setColor(Color.WHITE);
             bgPaint.setTextSize(38f);
             bgPaint.setTextAlign(Paint.Align.CENTER);
-            canvas.drawText("Pulsa ABRIR", getWidth() / 2f, getHeight() / 2f, bgPaint);
+            canvas.drawText("Pulsa Abrir", getWidth() / 2f, getHeight() / 2f, bgPaint);
         }
-    }
-
-    private void drawProcessing(Canvas canvas) {
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(Color.argb(170, 0, 0, 0));
-        canvas.drawRect(0, 0, getWidth(), getHeight(), p);
-
-        p.setColor(Color.WHITE);
-        p.setTextSize(34f);
-        p.setTextAlign(Paint.Align.CENTER);
-        canvas.drawText("Procesando varita...", getWidth() / 2f, getHeight() / 2f, p);
     }
 
     private void drawBackground(Canvas canvas) {
@@ -321,18 +315,31 @@ public class EditorCanvasView extends View {
         }
     }
 
+    private void drawProcessing(Canvas canvas) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(Color.argb(170, 0, 0, 0));
+        canvas.drawRect(0, 0, getWidth(), getHeight(), p);
+
+        p.setColor(Color.WHITE);
+        p.setTextSize(34f);
+        p.setTextAlign(Paint.Align.CENTER);
+        canvas.drawText("Procesando varita...", getWidth() / 2f, getHeight() / 2f, p);
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (workBitmap == null || processingMagic) return true;
 
-        if (!wandEnabled && !lassoEnabled) {
-            scaleDetector.onTouchEvent(event);
-        }
-
         int action = event.getActionMasked();
 
-        if (event.getPointerCount() > 1) {
-            scaling = true;
+        if (event.getPointerCount() >= 2) {
+            handleMultiTouch(event, action);
+            return true;
+        }
+
+        if (multiTouch && event.getPointerCount() < 2) {
+            multiTouch = false;
+            dragging = false;
             return true;
         }
 
@@ -348,29 +355,23 @@ public class EditorCanvasView extends View {
                 dragging = true;
 
                 if (lassoEnabled) {
-                    float bx = screenToBitmapX(sx);
-                    float by = screenToBitmapY(sy);
-
-                    if (isInsideBitmap(bx, by)) {
+                    float[] p = screenToBitmapPoint(sx, sy);
+                    if (isInsideBitmap(p[0], p[1])) {
                         lassoPath.reset();
-                        lassoPath.moveTo(bx, by);
+                        lassoPath.moveTo(p[0], p[1]);
                         lassoReady = true;
                     }
                 }
+
                 return true;
 
             case MotionEvent.ACTION_MOVE:
-                if (scaling) return true;
-
                 if (lassoEnabled) {
-                    float bx = screenToBitmapX(sx);
-                    float by = screenToBitmapY(sy);
-
-                    if (isInsideBitmap(bx, by)) {
-                        lassoPath.lineTo(bx, by);
+                    float[] p = screenToBitmapPoint(sx, sy);
+                    if (isInsideBitmap(p[0], p[1])) {
+                        lassoPath.lineTo(p[0], p[1]);
                         lassoReady = true;
                     }
-
                     invalidate();
                     return true;
                 }
@@ -385,9 +386,9 @@ public class EditorCanvasView extends View {
                     lastX = sx;
                     lastY = sy;
 
-                    limitPosition();
                     invalidate();
                 }
+
                 return true;
 
             case MotionEvent.ACTION_UP:
@@ -396,7 +397,7 @@ public class EditorCanvasView extends View {
                     lassoPath.close();
                 }
 
-                if (wandEnabled && !scaling) {
+                if (wandEnabled) {
                     float move = Math.abs(sx - downX) + Math.abs(sy - downY);
 
                     if (move < 25f) {
@@ -405,7 +406,6 @@ public class EditorCanvasView extends View {
                 }
 
                 dragging = false;
-                scaling = false;
                 invalidate();
                 return true;
         }
@@ -413,15 +413,103 @@ public class EditorCanvasView extends View {
         return true;
     }
 
+    private void handleMultiTouch(MotionEvent event, int action) {
+        if (event.getPointerCount() < 2) return;
+
+        if (action == MotionEvent.ACTION_POINTER_DOWN || !multiTouch) {
+            multiTouch = true;
+
+            startDistance = getDistance(event);
+            startAngle = getAngle(event);
+            startScale = scale;
+            startRotation = rotation;
+
+            float focusX = (event.getX(0) + event.getX(1)) / 2f;
+            float focusY = (event.getY(0) + event.getY(1)) / 2f;
+
+            float[] p = screenToBitmapPoint(focusX, focusY);
+            focusBitmapX = p[0];
+            focusBitmapY = p[1];
+
+            return;
+        }
+
+        if (action == MotionEvent.ACTION_MOVE && multiTouch) {
+            float currentDistance = getDistance(event);
+
+            if (startDistance > 10f) {
+                scale = startScale * (currentDistance / startDistance);
+            }
+
+            if (scale < minScale) scale = minScale;
+            if (scale > maxScale) scale = maxScale;
+
+            float currentAngle = getAngle(event);
+            rotation = startRotation + (currentAngle - startAngle);
+
+            float focusX = (event.getX(0) + event.getX(1)) / 2f;
+            float focusY = (event.getY(0) + event.getY(1)) / 2f;
+
+            float[] transformed = bitmapToScreenWithoutOffset(focusBitmapX, focusBitmapY);
+            offsetX = focusX - transformed[0];
+            offsetY = focusY - transformed[1];
+
+            invalidate();
+        }
+    }
+
+    private float getDistance(MotionEvent event) {
+        float dx = event.getX(1) - event.getX(0);
+        float dy = event.getY(1) - event.getY(0);
+        return (float) Math.sqrt(dx * dx + dy * dy);
+    }
+
+    private float getAngle(MotionEvent event) {
+        float dx = event.getX(1) - event.getX(0);
+        float dy = event.getY(1) - event.getY(0);
+        return (float) Math.toDegrees(Math.atan2(dy, dx));
+    }
+
+    private float[] bitmapToScreenWithoutOffset(float bx, float by) {
+        double rad = Math.toRadians(rotation);
+
+        float sx = bx * scale;
+        float sy = by * scale;
+
+        float rx = (float) (sx * Math.cos(rad) - sy * Math.sin(rad));
+        float ry = (float) (sx * Math.sin(rad) + sy * Math.cos(rad));
+
+        return new float[]{rx, ry};
+    }
+
+    private float[] screenToBitmapPoint(float screenX, float screenY) {
+        float x = screenX - offsetX;
+        float y = screenY - offsetY;
+
+        double rad = Math.toRadians(-rotation);
+
+        float rx = (float) (x * Math.cos(rad) - y * Math.sin(rad));
+        float ry = (float) (x * Math.sin(rad) + y * Math.cos(rad));
+
+        rx = rx / scale;
+        ry = ry / scale;
+
+        return new float[]{rx, ry};
+    }
+
     private void applyMagicWand(float screenX, float screenY) {
         if (workBitmap == null) return;
 
-        final int startX = (int) screenToBitmapX(screenX);
-        final int startY = (int) screenToBitmapY(screenY);
+        float[] p = screenToBitmapPoint(screenX, screenY);
+
+        final int startX = (int) p[0];
+        final int startY = (int) p[1];
 
         if (startX < 0 || startY < 0 || startX >= workBitmap.getWidth() || startY >= workBitmap.getHeight()) {
             return;
         }
+
+        saveState();
 
         processingMagic = true;
         invalidate();
@@ -562,14 +650,14 @@ public class EditorCanvasView extends View {
         int diffB = Math.abs(b1 - b2);
 
         return diffR <= magicTolerance &&
-               diffG <= magicTolerance &&
-               diffB <= magicTolerance;
+                diffG <= magicTolerance &&
+                diffB <= magicTolerance;
     }
 
     private void softenMagicEdges(int[] pixels, boolean[] erased, int width, int height) {
         int radius = edgeSoftness;
         if (radius < 1) radius = 1;
-        if (radius > 5) radius = 5;
+        if (radius > 6) radius = 6;
 
         int[] copy = pixels.clone();
 
@@ -584,6 +672,7 @@ public class EditorCanvasView extends View {
                 for (int dy = -radius; dy <= radius && !nearErased; dy++) {
                     for (int dx = -radius; dx <= radius; dx++) {
                         int ni = (y + dy) * width + (x + dx);
+
                         if (erased[ni]) {
                             nearErased = true;
                             break;
@@ -596,6 +685,7 @@ public class EditorCanvasView extends View {
                     int r = Color.red(c);
                     int g = Color.green(c);
                     int b = Color.blue(c);
+
                     pixels[index] = Color.argb(120, r, g, b);
                 }
             }
@@ -607,57 +697,11 @@ public class EditorCanvasView extends View {
             return false;
         }
 
+        saveState();
+
         Paint clearPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         clearPaint.setStyle(Paint.Style.FILL);
         clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
 
         if (edgeSoftness > 0) {
-            clearPaint.setMaskFilter(new BlurMaskFilter(edgeSoftness, BlurMaskFilter.Blur.NORMAL));
-        }
-
-        workCanvas.drawPath(lassoPath, clearPaint);
-        clearLasso();
-        invalidate();
-
-        return true;
-    }
-
-    private void clearLasso() {
-        lassoPath.reset();
-        lassoReady = false;
-    }
-
-    private float screenToBitmapX(float screenX) {
-        return (screenX - offsetX) / scale;
-    }
-
-    private float screenToBitmapY(float screenY) {
-        return (screenY - offsetY) / scale;
-    }
-
-    private boolean isInsideBitmap(float x, float y) {
-        if (workBitmap == null) return false;
-        return x >= 0 && y >= 0 && x < workBitmap.getWidth() && y < workBitmap.getHeight();
-    }
-
-    private void limitPosition() {
-        if (workBitmap == null) return;
-
-        float imageW = workBitmap.getWidth() * scale;
-        float imageH = workBitmap.getHeight() * scale;
-
-        if (imageW <= getWidth()) {
-            offsetX = (getWidth() - imageW) / 2f;
-        } else {
-            if (offsetX > 0) offsetX = 0;
-            if (offsetX + imageW < getWidth()) offsetX = getWidth() - imageW;
-        }
-
-        if (imageH <= getHeight()) {
-            offsetY = (getHeight() - imageH) / 2f;
-        } else {
-            if (offsetY > 0) offsetY = 0;
-            if (offsetY + imageH < getHeight()) offsetY = getHeight() - imageH;
-        }
-    }
-            }
+            clearPaint.setMaskFilter(new Bl
