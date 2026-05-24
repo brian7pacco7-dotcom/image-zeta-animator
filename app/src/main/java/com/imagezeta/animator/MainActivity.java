@@ -10,9 +10,11 @@ import android.net.Uri;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -27,16 +29,16 @@ public class MainActivity extends Activity {
 
     private EditorCanvasView editorView;
 
-    private LinearLayout sidePanel;
-    private boolean panelVisible = true;
+    private LinearLayout configPanel;
+    private boolean configVisible = true;
 
-    private Button btnTogglePanel;
-    private Button btnOpen;
-    private Button btnWand;
+    private Button btnUndo;
+    private Button btnRedo;
+    private Button btnConfig;
     private Button btnArea;
-    private Button btnApplyArea;
-    private Button btnRotate;
-    private Button btnBg;
+    private Button btnWand;
+    private Button btnOpen;
+    private Button btnEraseArea;
     private Button btnReset;
     private Button btnSave;
 
@@ -50,125 +52,213 @@ public class MainActivity extends Activity {
     }
 
     private void buildLayout() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.HORIZONTAL);
-        root.setBackgroundColor(Color.BLACK);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(55, 55, 55));
 
         editorView = new EditorCanvasView(this);
-
-        btnTogglePanel = new Button(this);
-        btnTogglePanel.setText("▶");
-        btnTogglePanel.setTextSize(18f);
-
-        sidePanel = new LinearLayout(this);
-        sidePanel.setOrientation(LinearLayout.VERTICAL);
-        sidePanel.setGravity(Gravity.CENTER_HORIZONTAL);
-        sidePanel.setPadding(8, 8, 8, 8);
-        sidePanel.setBackgroundColor(Color.rgb(22, 22, 22));
-
-        btnOpen = new Button(this);
-        btnOpen.setText("ABRIR");
-
-        btnWand = new Button(this);
-        btnWand.setText("VARITA\nOFF");
-
-        btnArea = new Button(this);
-        btnArea.setText("ÁREA\nOFF");
-
-        btnApplyArea = new Button(this);
-        btnApplyArea.setText("BORRAR\nÁREA");
-
-        btnRotate = new Button(this);
-        btnRotate.setText("GIRAR");
-
-        btnBg = new Button(this);
-        btnBg.setText("FONDO");
-
-        btnReset = new Button(this);
-        btnReset.setText("RESET");
-
-        btnSave = new Button(this);
-        btnSave.setText("GUARDAR");
-
-        TextView title = new TextView(this);
-        title.setText("CONFIG");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(13f);
-        title.setGravity(Gravity.CENTER);
-
-        txtTolerance = new TextView(this);
-        txtTolerance.setTextColor(Color.WHITE);
-        txtTolerance.setTextSize(11f);
-        txtTolerance.setGravity(Gravity.CENTER);
-        txtTolerance.setText("Tolerancia\n35");
-
-        SeekBar seekTolerance = new SeekBar(this);
-        seekTolerance.setMax(95);
-        seekTolerance.setProgress(30);
-
-        txtSoftness = new TextView(this);
-        txtSoftness.setTextColor(Color.WHITE);
-        txtSoftness.setTextSize(11f);
-        txtSoftness.setGravity(Gravity.CENTER);
-        txtSoftness.setText("Suavidad\n2");
-
-        SeekBar seekSoftness = new SeekBar(this);
-        seekSoftness.setMax(10);
-        seekSoftness.setProgress(2);
-
-        addPanelView(sidePanel, btnOpen);
-        addPanelView(sidePanel, btnWand);
-        addPanelView(sidePanel, btnArea);
-        addPanelView(sidePanel, btnApplyArea);
-        addPanelView(sidePanel, btnRotate);
-        addPanelView(sidePanel, btnBg);
-        addPanelView(sidePanel, btnReset);
-        addPanelView(sidePanel, btnSave);
-        addPanelView(sidePanel, title);
-        addPanelView(sidePanel, txtTolerance);
-        addPanelView(sidePanel, seekTolerance);
-        addPanelView(sidePanel, txtSoftness);
-        addPanelView(sidePanel, seekSoftness);
-
-        root.addView(editorView, new LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                1
+        root.addView(editorView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
         ));
 
-        root.addView(btnTogglePanel, new LinearLayout.LayoutParams(
-                dpToPx(34),
-                LinearLayout.LayoutParams.MATCH_PARENT
-        ));
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(8), dp(8), dp(8), dp(8));
+        topBar.setBackgroundColor(Color.rgb(70, 70, 70));
 
-        root.addView(sidePanel, new LinearLayout.LayoutParams(
-                dpToPx(118),
-                LinearLayout.LayoutParams.MATCH_PARENT
-        ));
+        btnUndo = roundButton("↶");
+        btnRedo = roundButton("↷");
+        btnWand = roundButton("✦");
+        btnArea = roundButton("□");
+        btnConfig = roundButton("☝");
+
+        topBar.addView(btnUndo);
+        topBar.addView(btnRedo);
+
+        SpaceView space = new SpaceView(this);
+        topBar.addView(space, new LinearLayout.LayoutParams(0, 1, 1));
+
+        topBar.addView(btnWand);
+        topBar.addView(btnArea);
+        topBar.addView(btnConfig);
+
+        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                dp(72)
+        );
+        topParams.gravity = Gravity.TOP;
+        root.addView(topBar, topParams);
+
+        configPanel = buildConfigPanel();
+
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+                dp(230),
+                FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        panelParams.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
+        panelParams.setMargins(0, dp(70), dp(14), dp(70));
+        root.addView(configPanel, panelParams);
+
+        LinearLayout bottomBar = new LinearLayout(this);
+        bottomBar.setOrientation(LinearLayout.HORIZONTAL);
+        bottomBar.setGravity(Gravity.CENTER);
+        bottomBar.setPadding(dp(4), dp(4), dp(4), dp(4));
+        bottomBar.setBackgroundColor(Color.rgb(70, 70, 70));
+
+        btnOpen = smallBottomButton("Abrir");
+        btnEraseArea = smallBottomButton("Borrar\nÁrea");
+        btnReset = smallBottomButton("Restaurar");
+        btnSave = smallBottomButton("Guardar");
+
+        bottomBar.addView(btnOpen);
+        bottomBar.addView(btnEraseArea);
+        bottomBar.addView(btnReset);
+        bottomBar.addView(btnSave);
+
+        FrameLayout.LayoutParams bottomParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                dp(70)
+        );
+        bottomParams.gravity = Gravity.BOTTOM;
+        root.addView(bottomBar, bottomParams);
 
         setContentView(root);
 
-        btnTogglePanel.setOnClickListener(new View.OnClickListener() {
+        btnUndo.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(View v) {
-                panelVisible = !panelVisible;
+            public void onClick(View view) {
+                editorView.undo();
+            }
+        });
 
-                if (panelVisible) {
-                    sidePanel.setVisibility(View.VISIBLE);
-                    btnTogglePanel.setText("▶");
+        btnRedo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                editorView.redo();
+            }
+        });
+
+        btnConfig.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                configVisible = !configVisible;
+                configPanel.setVisibility(configVisible ? View.VISIBLE : View.GONE);
+            }
+        });
+
+        btnWand.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                editorView.toggleWand();
+
+                if (editorView.isWandEnabled()) {
+                    editorView.setLassoEnabled(false);
+                    Toast.makeText(MainActivity.this, "Varita mágica: toca un color", Toast.LENGTH_SHORT).show();
                 } else {
-                    sidePanel.setVisibility(View.GONE);
-                    btnTogglePanel.setText("◀");
+                    Toast.makeText(MainActivity.this, "Mover, zoom y girar con dedos", Toast.LENGTH_SHORT).show();
                 }
             }
         });
+
+        btnArea.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                editorView.toggleLasso();
+
+                if (editorView.isLassoEnabled()) {
+                    editorView.setWandEnabled(false);
+                    Toast.makeText(MainActivity.this, "Dibuja selección libre", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(MainActivity.this, "Selección apagada", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        btnOpen.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                openImage();
+            }
+        });
+
+        btnEraseArea.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                boolean ok = editorView.applyLassoErase();
+                Toast.makeText(MainActivity.this, ok ? "Área borrada" : "Primero dibuja un área", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        btnReset.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                editorView.resetImage();
+            }
+        });
+
+        btnSave.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                saveImage();
+            }
+        });
+    }
+
+    private LinearLayout buildConfigPanel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(14), dp(14), dp(14), dp(14));
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.argb(220, 20, 20, 20));
+        bg.setCornerRadius(dp(18));
+        panel.setBackground(bg);
+
+        TextView title = new TextView(this);
+        title.setText("Herramienta");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(18f);
+        title.setGravity(Gravity.LEFT);
+        panel.addView(title);
+
+        txtTolerance = new TextView(this);
+        txtTolerance.setText("Tolerancia: 35");
+        txtTolerance.setTextColor(Color.WHITE);
+        txtTolerance.setTextSize(15f);
+        txtTolerance.setPadding(0, dp(16), 0, 0);
+        panel.addView(txtTolerance);
+
+        SeekBar seekTolerance = new SeekBar(this);
+        seekTolerance.setMax(145);
+        seekTolerance.setProgress(30);
+        panel.addView(seekTolerance);
+
+        txtSoftness = new TextView(this);
+        txtSoftness.setText("Suavidad: 2");
+        txtSoftness.setTextColor(Color.WHITE);
+        txtSoftness.setTextSize(15f);
+        txtSoftness.setPadding(0, dp(16), 0, 0);
+        panel.addView(txtSoftness);
+
+        SeekBar seekSoftness = new SeekBar(this);
+        seekSoftness.setMax(20);
+        seekSoftness.setProgress(2);
+        panel.addView(seekSoftness);
+
+        TextView help = new TextView(this);
+        help.setText("Varita: toca un color.\nÁrea: dibuja selección.\nGirar: usa dos dedos.");
+        help.setTextColor(Color.LTGRAY);
+        help.setTextSize(13f);
+        help.setPadding(0, dp(16), 0, 0);
+        panel.addView(help);
 
         seekTolerance.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int value = 5 + progress;
                 editorView.setMagicTolerance(value);
-                txtTolerance.setText("Tolerancia\n" + value);
+                txtTolerance.setText("Tolerancia: " + value);
             }
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -179,107 +269,52 @@ public class MainActivity extends Activity {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 editorView.setEdgeSoftness(progress);
-                txtSoftness.setText("Suavidad\n" + progress);
+                txtSoftness.setText("Suavidad: " + progress);
             }
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        btnOpen.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                openImage();
-            }
-        });
-
-        btnWand.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                editorView.toggleWand();
-
-                if (editorView.isWandEnabled()) {
-                    editorView.setLassoEnabled(false);
-                    btnWand.setText("VARITA\nON");
-                    btnArea.setText("ÁREA\nOFF");
-                    Toast.makeText(MainActivity.this, "Toca un color para borrar similares", Toast.LENGTH_SHORT).show();
-                } else {
-                    btnWand.setText("VARITA\nOFF");
-                    Toast.makeText(MainActivity.this, "Mover y zoom activos", Toast.LENGTH_SHORT).show();
-                }
-            }
-        });
-
-        btnArea.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                editorView.toggleLasso();
-
-                if (editorView.isLassoEnabled()) {
-                    editorView.setWandEnabled(false);
-                    btnArea.setText("ÁREA\nON");
-                    btnWand.setText("VARITA\nOFF");
-                    Toast.makeText(MainActivity.this, "Dibuja el área libre", Toast.LENGTH_SHORT).show();
-                } else {
-                    btnArea.setText("ÁREA\nOFF");
-                }
-            }
-        });
-
-        btnApplyArea.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                boolean ok = editorView.applyLassoErase();
-
-                if (ok) {
-                    Toast.makeText(MainActivity.this, "Área borrada", Toast.LENGTH_SHORT).show();
-                } else {
-                    Toast.makeText(MainActivity.this, "Primero dibuja un área", Toast.LENGTH_SHORT).show();
-                }
-            }
-        });
-
-        btnRotate.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                editorView.rotateRight();
-            }
-        });
-
-        btnBg.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                editorView.toggleCheckerBackground();
-            }
-        });
-
-        btnReset.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                editorView.resetImage();
-            }
-        });
-
-        btnSave.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                saveImage();
-            }
-        });
+        return panel;
     }
 
-    private void addPanelView(LinearLayout panel, View view) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        );
-        params.setMargins(0, 4, 0, 4);
-        panel.addView(view, params);
+    private Button roundButton(String text) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(22f);
+        b.setTextColor(Color.WHITE);
+        b.setAllCaps(false);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(Color.rgb(55, 55, 55));
+        bg.setStroke(dp(1), Color.rgb(120, 120, 120));
+        b.setBackground(bg);
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(58), dp(58));
+        params.setMargins(dp(6), 0, dp(6), 0);
+        b.setLayoutParams(params);
+
+        return b;
     }
 
-    private int dpToPx(int dp) {
-        float density = getResources().getDisplayMetrics().density;
-        return Math.round(dp * density);
+    private Button smallBottomButton(String text) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(11f);
+        b.setTextColor(Color.WHITE);
+        b.setAllCaps(false);
+        b.setBackgroundColor(Color.TRANSPARENT);
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1);
+        b.setLayoutParams(params);
+
+        return b;
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     private void openImage() {
@@ -296,16 +331,10 @@ public class MainActivity extends Activity {
         if (requestCode == PICK_IMAGE && resultCode == RESULT_OK && data != null) {
             try {
                 Uri uri = data.getData();
-
-                if (uri == null) {
-                    Toast.makeText(this, "Imagen no válida", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                Bitmap bitmap = decodeBitmapFromUri(uri, 2000);
+                Bitmap bitmap = decodeBitmapFromUri(uri, 2200);
 
                 if (bitmap == null) {
-                    Toast.makeText(this, "No se pudo abrir la imagen", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "No se pudo abrir imagen", Toast.LENGTH_SHORT).show();
                     return;
                 }
 
@@ -313,7 +342,7 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "Imagen cargada", Toast.LENGTH_SHORT).show();
 
             } catch (Exception e) {
-                Toast.makeText(this, "Error al abrir imagen", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Error al abrir", Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -327,11 +356,8 @@ public class MainActivity extends Activity {
             BitmapFactory.decodeStream(input1, null, bounds);
             if (input1 != null) input1.close();
 
-            int width = bounds.outWidth;
-            int height = bounds.outHeight;
-
             int sample = 1;
-            while ((width / sample) > maxSize || (height / sample) > maxSize) {
+            while ((bounds.outWidth / sample) > maxSize || (bounds.outHeight / sample) > maxSize) {
                 sample *= 2;
             }
 
@@ -367,7 +393,7 @@ public class MainActivity extends Activity {
             Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
 
             if (uri == null) {
-                Toast.makeText(this, "No se pudo crear el archivo", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "No se pudo guardar", Toast.LENGTH_SHORT).show();
                 return;
             }
 
@@ -388,4 +414,10 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Error al guardar", Toast.LENGTH_SHORT).show();
         }
     }
+
+    public static class SpaceView extends View {
+        public SpaceView(android.content.Context context) {
+            super(context);
+        }
     }
+                                   }
