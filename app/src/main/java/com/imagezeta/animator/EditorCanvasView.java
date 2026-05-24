@@ -5,7 +5,6 @@ import android.graphics.Bitmap;
 import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
@@ -63,6 +62,7 @@ public class EditorCanvasView extends View {
 
     private final ArrayList<Bitmap> undoStack = new ArrayList<>();
     private final ArrayList<Bitmap> redoStack = new ArrayList<>();
+
     private static final int MAX_HISTORY = 12;
 
     public EditorCanvasView(Context context) {
@@ -104,9 +104,13 @@ public class EditorCanvasView extends View {
 
         undoStack.clear();
         redoStack.clear();
+
         clearLasso();
 
+        scale = 1f;
         rotation = 0f;
+        offsetX = 0f;
+        offsetY = 0f;
 
         post(new Runnable() {
             @Override
@@ -130,6 +134,7 @@ public class EditorCanvasView extends View {
         workCanvas = new Canvas(workBitmap);
 
         clearLasso();
+
         rotation = 0f;
         fitImageToScreen();
         invalidate();
@@ -168,7 +173,10 @@ public class EditorCanvasView extends View {
 
         if (undoStack.size() > MAX_HISTORY) {
             Bitmap old = undoStack.remove(0);
-            if (old != null && !old.isRecycled()) old.recycle();
+
+            if (old != null && !old.isRecycled()) {
+                old.recycle();
+            }
         }
 
         redoStack.clear();
@@ -273,6 +281,7 @@ public class EditorCanvasView extends View {
 
         if (workBitmap != null) {
             canvas.save();
+
             canvas.translate(offsetX, offsetY);
             canvas.rotate(rotation);
             canvas.scale(scale, scale);
@@ -317,6 +326,7 @@ public class EditorCanvasView extends View {
 
     private void drawProcessing(Canvas canvas) {
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
         p.setColor(Color.argb(170, 0, 0, 0));
         canvas.drawRect(0, 0, getWidth(), getHeight(), p);
 
@@ -347,6 +357,7 @@ public class EditorCanvasView extends View {
         float sy = event.getY();
 
         switch (action) {
+
             case MotionEvent.ACTION_DOWN:
                 downX = sx;
                 downY = sy;
@@ -356,6 +367,7 @@ public class EditorCanvasView extends View {
 
                 if (lassoEnabled) {
                     float[] p = screenToBitmapPoint(sx, sy);
+
                     if (isInsideBitmap(p[0], p[1])) {
                         lassoPath.reset();
                         lassoPath.moveTo(p[0], p[1]);
@@ -368,10 +380,12 @@ public class EditorCanvasView extends View {
             case MotionEvent.ACTION_MOVE:
                 if (lassoEnabled) {
                     float[] p = screenToBitmapPoint(sx, sy);
+
                     if (isInsideBitmap(p[0], p[1])) {
                         lassoPath.lineTo(p[0], p[1]);
                         lassoReady = true;
                     }
+
                     invalidate();
                     return true;
                 }
@@ -451,6 +465,7 @@ public class EditorCanvasView extends View {
             float focusY = (event.getY(0) + event.getY(1)) / 2f;
 
             float[] transformed = bitmapToScreenWithoutOffset(focusBitmapX, focusBitmapY);
+
             offsetX = focusX - transformed[0];
             offsetY = focusY - transformed[1];
 
@@ -461,12 +476,14 @@ public class EditorCanvasView extends View {
     private float getDistance(MotionEvent event) {
         float dx = event.getX(1) - event.getX(0);
         float dy = event.getY(1) - event.getY(0);
+
         return (float) Math.sqrt(dx * dx + dy * dy);
     }
 
     private float getAngle(MotionEvent event) {
         float dx = event.getX(1) - event.getX(0);
         float dy = event.getY(1) - event.getY(0);
+
         return (float) Math.toDegrees(Math.atan2(dy, dx));
     }
 
@@ -518,6 +535,7 @@ public class EditorCanvasView extends View {
             @Override
             public void run() {
                 magicErasePixels(startX, startY);
+
                 processingMagic = false;
                 postInvalidate();
             }
@@ -595,6 +613,7 @@ public class EditorCanvasView extends View {
 
             if (x > 0) {
                 n = index - 1;
+
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -603,6 +622,7 @@ public class EditorCanvasView extends View {
 
             if (x < width - 1) {
                 n = index + 1;
+
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -611,6 +631,7 @@ public class EditorCanvasView extends View {
 
             if (y > 0) {
                 n = index - width;
+
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -619,6 +640,7 @@ public class EditorCanvasView extends View {
 
             if (y < height - 1) {
                 n = index + width;
+
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -656,6 +678,7 @@ public class EditorCanvasView extends View {
 
     private void softenMagicEdges(int[] pixels, boolean[] erased, int width, int height) {
         int radius = edgeSoftness;
+
         if (radius < 1) radius = 1;
         if (radius > 6) radius = 6;
 
@@ -682,6 +705,7 @@ public class EditorCanvasView extends View {
 
                 if (nearErased) {
                     int c = copy[index];
+
                     int r = Color.red(c);
                     int g = Color.green(c);
                     int b = Color.blue(c);
@@ -701,7 +725,4 @@ public class EditorCanvasView extends View {
 
         Paint clearPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         clearPaint.setStyle(Paint.Style.FILL);
-        clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
-
-        if (edgeSoftness > 0) {
-            clearPaint.setMaskFilter(new Bl
+        clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.C
