@@ -23,16 +23,23 @@ public class EditorCanvasView extends View {
 
     private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint lassoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint lassoFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
+    private final Paint eraserPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint lassoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private final Path lassoPath = new Path();
+
+    private boolean eraserEnabled = false;
     private boolean wandEnabled = false;
     private boolean lassoEnabled = false;
-    private boolean checkerBackground = true;
     private boolean lassoReady = false;
     private boolean processingMagic = false;
 
-    private final Path lassoPath = new Path();
+    private int backgroundMode = 0; // 0 tablero, 1 blanco, 2 negro
+
+    private float brushSize = 45f;
+    private int magicTolerance = 35;
+    private int edgeSoftness = 2;
 
     private float scale = 1f;
     private float minScale = 0.2f;
@@ -49,6 +56,7 @@ public class EditorCanvasView extends View {
 
     private boolean dragging = false;
     private boolean multiTouch = false;
+    private boolean erasingStroke = false;
 
     private float startDistance = 0f;
     private float startAngle = 0f;
@@ -57,12 +65,9 @@ public class EditorCanvasView extends View {
     private float focusBitmapX = 0f;
     private float focusBitmapY = 0f;
 
-    private int magicTolerance = 35;
-    private int edgeSoftness = 2;
-
     private final ArrayList<Bitmap> undoStack = new ArrayList<>();
     private final ArrayList<Bitmap> redoStack = new ArrayList<>();
-    private static final int MAX_HISTORY = 12;
+    private static final int MAX_HISTORY = 15;
 
     public EditorCanvasView(Context context) {
         super(context);
@@ -82,14 +87,17 @@ public class EditorCanvasView extends View {
     private void init() {
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
-        lassoPaint.setColor(Color.CYAN);
+        eraserPaint.setStyle(Paint.Style.STROKE);
+        eraserPaint.setStrokeCap(Paint.Cap.ROUND);
+        eraserPaint.setStrokeJoin(Paint.Join.ROUND);
+        eraserPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+        updateEraserPaint();
+
+        lassoPaint.setColor(Color.WHITE);
         lassoPaint.setStyle(Paint.Style.STROKE);
         lassoPaint.setStrokeWidth(4f);
         lassoPaint.setStrokeCap(Paint.Cap.ROUND);
         lassoPaint.setStrokeJoin(Paint.Join.ROUND);
-
-        lassoFillPaint.setColor(Color.argb(55, 0, 255, 255));
-        lassoFillPaint.setStyle(Paint.Style.FILL);
     }
 
     public void setBitmap(Bitmap bitmap) {
@@ -132,7 +140,6 @@ public class EditorCanvasView extends View {
         workCanvas = new Canvas(workBitmap);
 
         clearLasso();
-
         rotation = 0f;
         fitImageToScreen();
         invalidate();
@@ -179,23 +186,43 @@ public class EditorCanvasView extends View {
         redoStack.clear();
     }
 
-    public void toggleWand() {
-        wandEnabled = !wandEnabled;
-
-        if (wandEnabled) {
+    public void toggleEraser() {
+        eraserEnabled = !eraserEnabled;
+        if (eraserEnabled) {
+            wandEnabled = false;
             lassoEnabled = false;
         }
+        invalidate();
+    }
 
+    public void setEraserEnabled(boolean enabled) {
+        eraserEnabled = enabled;
+        if (enabled) {
+            wandEnabled = false;
+            lassoEnabled = false;
+        }
+        invalidate();
+    }
+
+    public boolean isEraserEnabled() {
+        return eraserEnabled;
+    }
+
+    public void toggleWand() {
+        wandEnabled = !wandEnabled;
+        if (wandEnabled) {
+            eraserEnabled = false;
+            lassoEnabled = false;
+        }
         invalidate();
     }
 
     public void setWandEnabled(boolean enabled) {
         wandEnabled = enabled;
-
         if (enabled) {
+            eraserEnabled = false;
             lassoEnabled = false;
         }
-
         invalidate();
     }
 
@@ -205,23 +232,21 @@ public class EditorCanvasView extends View {
 
     public void toggleLasso() {
         lassoEnabled = !lassoEnabled;
-
         if (lassoEnabled) {
+            eraserEnabled = false;
             wandEnabled = false;
             clearLasso();
         }
-
         invalidate();
     }
 
     public void setLassoEnabled(boolean enabled) {
         lassoEnabled = enabled;
-
         if (enabled) {
+            eraserEnabled = false;
             wandEnabled = false;
             clearLasso();
         }
-
         invalidate();
     }
 
@@ -229,23 +254,42 @@ public class EditorCanvasView extends View {
         return lassoEnabled;
     }
 
-    public void toggleCheckerBackground() {
-        checkerBackground = !checkerBackground;
+    public void setBrushSize(float size) {
+        if (size < 5f) size = 5f;
+        if (size > 220f) size = 220f;
+        brushSize = size;
+        updateEraserPaint();
         invalidate();
     }
 
     public void setMagicTolerance(int tolerance) {
-        if (tolerance < 5) tolerance = 5;
-        if (tolerance > 150) tolerance = 150;
-
+        if (tolerance < 0) tolerance = 0;
+        if (tolerance > 255) tolerance = 255;
         magicTolerance = tolerance;
     }
 
     public void setEdgeSoftness(int softness) {
         if (softness < 0) softness = 0;
-        if (softness > 20) softness = 20;
-
+        if (softness > 30) softness = 30;
         edgeSoftness = softness;
+        updateEraserPaint();
+        invalidate();
+    }
+
+    public void toggleCheckerBackground() {
+        backgroundMode++;
+        if (backgroundMode > 2) backgroundMode = 0;
+        invalidate();
+    }
+
+    private void updateEraserPaint() {
+        eraserPaint.setStrokeWidth(brushSize / Math.max(scale, 0.1f));
+
+        if (edgeSoftness <= 0) {
+            eraserPaint.setMaskFilter(null);
+        } else {
+            eraserPaint.setMaskFilter(new BlurMaskFilter(edgeSoftness, BlurMaskFilter.Blur.NORMAL));
+        }
     }
 
     private void fitImageToScreen() {
@@ -258,10 +302,13 @@ public class EditorCanvasView extends View {
         float imgH = workBitmap.getHeight();
 
         scale = Math.min(viewW / imgW, viewH / imgH);
-        minScale = scale * 0.5f;
+        minScale = scale * 0.35f;
+        if (minScale < 0.08f) minScale = 0.08f;
 
         offsetX = (viewW - imgW * scale) / 2f;
         offsetY = (viewH - imgH * scale) / 2f;
+
+        updateEraserPaint();
     }
 
     @Override
@@ -286,7 +333,6 @@ public class EditorCanvasView extends View {
             canvas.drawBitmap(workBitmap, 0, 0, imagePaint);
 
             if (lassoReady || lassoEnabled) {
-                canvas.drawPath(lassoPath, lassoFillPaint);
                 canvas.drawPath(lassoPath, lassoPaint);
             }
 
@@ -300,13 +346,18 @@ public class EditorCanvasView extends View {
             bgPaint.setColor(Color.WHITE);
             bgPaint.setTextSize(38f);
             bgPaint.setTextAlign(Paint.Align.CENTER);
-            canvas.drawText("Pulsa Abrir", getWidth() / 2f, getHeight() / 2f, bgPaint);
+            canvas.drawText("Pulsa ABRIR", getWidth() / 2f, getHeight() / 2f, bgPaint);
         }
     }
 
     private void drawBackground(Canvas canvas) {
-        if (!checkerBackground) {
-            canvas.drawColor(Color.rgb(35, 35, 35));
+        if (backgroundMode == 1) {
+            canvas.drawColor(Color.WHITE);
+            return;
+        }
+
+        if (backgroundMode == 2) {
+            canvas.drawColor(Color.BLACK);
             return;
         }
 
@@ -323,7 +374,6 @@ public class EditorCanvasView extends View {
 
     private void drawProcessing(Canvas canvas) {
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-
         p.setColor(Color.argb(170, 0, 0, 0));
         canvas.drawRect(0, 0, getWidth(), getHeight(), p);
 
@@ -347,6 +397,7 @@ public class EditorCanvasView extends View {
         if (multiTouch && event.getPointerCount() < 2) {
             multiTouch = false;
             dragging = false;
+            erasingStroke = false;
             return true;
         }
 
@@ -361,6 +412,14 @@ public class EditorCanvasView extends View {
                 lastY = sy;
                 dragging = true;
 
+                if (eraserEnabled) {
+                    saveState();
+                    erasingStroke = true;
+                    eraseDot(sx, sy);
+                    invalidate();
+                    return true;
+                }
+
                 if (lassoEnabled) {
                     float[] p = screenToBitmapPoint(sx, sy);
 
@@ -369,11 +428,22 @@ public class EditorCanvasView extends View {
                         lassoPath.moveTo(p[0], p[1]);
                         lassoReady = true;
                     }
+
+                    invalidate();
+                    return true;
                 }
 
                 return true;
 
             case MotionEvent.ACTION_MOVE:
+                if (eraserEnabled && erasingStroke) {
+                    eraseStroke(lastX, lastY, sx, sy);
+                    lastX = sx;
+                    lastY = sy;
+                    invalidate();
+                    return true;
+                }
+
                 if (lassoEnabled) {
                     float[] p = screenToBitmapPoint(sx, sy);
 
@@ -397,14 +467,26 @@ public class EditorCanvasView extends View {
                     lastY = sy;
 
                     invalidate();
+                    return true;
                 }
 
                 return true;
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                if (eraserEnabled && erasingStroke) {
+                    eraseDot(sx, sy);
+                    erasingStroke = false;
+                    dragging = false;
+                    invalidate();
+                    return true;
+                }
+
                 if (lassoEnabled && lassoReady) {
                     lassoPath.close();
+                    dragging = false;
+                    invalidate();
+                    return true;
                 }
 
                 if (wandEnabled) {
@@ -428,6 +510,8 @@ public class EditorCanvasView extends View {
 
         if (action == MotionEvent.ACTION_POINTER_DOWN || !multiTouch) {
             multiTouch = true;
+            dragging = false;
+            erasingStroke = false;
 
             startDistance = getDistance(event);
             startAngle = getAngle(event);
@@ -440,7 +524,6 @@ public class EditorCanvasView extends View {
             float[] p = screenToBitmapPoint(focusX, focusY);
             focusBitmapX = p[0];
             focusBitmapY = p[1];
-
             return;
         }
 
@@ -465,6 +548,7 @@ public class EditorCanvasView extends View {
             offsetX = focusX - transformed[0];
             offsetY = focusY - transformed[1];
 
+            updateEraserPaint();
             invalidate();
         }
     }
@@ -472,14 +556,12 @@ public class EditorCanvasView extends View {
     private float getDistance(MotionEvent event) {
         float dx = event.getX(1) - event.getX(0);
         float dy = event.getY(1) - event.getY(0);
-
         return (float) Math.sqrt(dx * dx + dy * dy);
     }
 
     private float getAngle(MotionEvent event) {
         float dx = event.getX(1) - event.getX(0);
         float dy = event.getY(1) - event.getY(0);
-
         return (float) Math.toDegrees(Math.atan2(dy, dx));
     }
 
@@ -510,6 +592,35 @@ public class EditorCanvasView extends View {
         return new float[]{rx, ry};
     }
 
+    private void eraseStroke(float sx1, float sy1, float sx2, float sy2) {
+        if (workBitmap == null || workCanvas == null) return;
+
+        float[] p1 = screenToBitmapPoint(sx1, sy1);
+        float[] p2 = screenToBitmapPoint(sx2, sy2);
+
+        updateEraserPaint();
+        workCanvas.drawLine(p1[0], p1[1], p2[0], p2[1], eraserPaint);
+    }
+
+    private void eraseDot(float sx, float sy) {
+        if (workBitmap == null || workCanvas == null) return;
+
+        float[] p = screenToBitmapPoint(sx, sy);
+
+        Paint dotPaint = new Paint(eraserPaint);
+        dotPaint.setStyle(Paint.Style.FILL);
+        dotPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+
+        if (edgeSoftness > 0) {
+            dotPaint.setMaskFilter(new BlurMaskFilter(edgeSoftness, BlurMaskFilter.Blur.NORMAL));
+        } else {
+            dotPaint.setMaskFilter(null);
+        }
+
+        float radius = (brushSize / Math.max(scale, 0.1f)) / 2f;
+        workCanvas.drawCircle(p[0], p[1], radius, dotPaint);
+    }
+
     private void applyMagicWand(float screenX, float screenY) {
         if (workBitmap == null) return;
 
@@ -531,7 +642,6 @@ public class EditorCanvasView extends View {
             @Override
             public void run() {
                 magicErasePixels(startX, startY);
-
                 processingMagic = false;
                 postInvalidate();
             }
@@ -604,12 +714,10 @@ public class EditorCanvasView extends View {
 
             int x = index % width;
             int y = index / width;
-
             int n;
 
             if (x > 0) {
                 n = index - 1;
-
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -618,7 +726,6 @@ public class EditorCanvasView extends View {
 
             if (x < width - 1) {
                 n = index + 1;
-
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -627,7 +734,6 @@ public class EditorCanvasView extends View {
 
             if (y > 0) {
                 n = index - width;
-
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -636,7 +742,6 @@ public class EditorCanvasView extends View {
 
             if (y < height - 1) {
                 n = index + width;
-
                 if (!visited[n]) {
                     visited[n] = true;
                     queue[tail++] = n;
@@ -655,28 +760,19 @@ public class EditorCanvasView extends View {
     private boolean isSimilarColor(int target, int current) {
         if (Color.alpha(current) == 0) return false;
 
-        int r1 = Color.red(target);
-        int g1 = Color.green(target);
-        int b1 = Color.blue(target);
+        int dr = Math.abs(Color.red(target) - Color.red(current));
+        int dg = Math.abs(Color.green(target) - Color.green(current));
+        int db = Math.abs(Color.blue(target) - Color.blue(current));
 
-        int r2 = Color.red(current);
-        int g2 = Color.green(current);
-        int b2 = Color.blue(current);
-
-        int diffR = Math.abs(r1 - r2);
-        int diffG = Math.abs(g1 - g2);
-        int diffB = Math.abs(b1 - b2);
-
-        return diffR <= magicTolerance &&
-                diffG <= magicTolerance &&
-                diffB <= magicTolerance;
+        return dr <= magicTolerance &&
+                dg <= magicTolerance &&
+                db <= magicTolerance;
     }
 
     private void softenMagicEdges(int[] pixels, boolean[] erased, int width, int height) {
         int radius = edgeSoftness;
-
         if (radius < 1) radius = 1;
-        if (radius > 6) radius = 6;
+        if (radius > 8) radius = 8;
 
         int[] copy = pixels.clone();
 
@@ -691,7 +787,6 @@ public class EditorCanvasView extends View {
                 for (int dy = -radius; dy <= radius && !nearErased; dy++) {
                     for (int dx = -radius; dx <= radius; dx++) {
                         int ni = (y + dy) * width + (x + dx);
-
                         if (erased[ni]) {
                             nearErased = true;
                             break;
@@ -701,12 +796,7 @@ public class EditorCanvasView extends View {
 
                 if (nearErased) {
                     int c = copy[index];
-
-                    int r = Color.red(c);
-                    int g = Color.green(c);
-                    int b = Color.blue(c);
-
-                    pixels[index] = Color.argb(120, r, g, b);
+                    pixels[index] = Color.argb(120, Color.red(c), Color.green(c), Color.blue(c));
                 }
             }
         }
