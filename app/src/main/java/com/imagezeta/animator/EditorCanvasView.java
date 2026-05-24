@@ -2,629 +2,569 @@ package com.imagezeta.animator;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapShader;
+import android.graphics.BitmapFactory;
+import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Point;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
-import android.graphics.RectF;
-import android.graphics.Shader;
+import android.net.Uri;
+import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
-import android.widget.Toast;
 
+import java.io.InputStream;
 import java.util.ArrayDeque;
 
 public class EditorCanvasView extends View {
 
-    public static final int TOOL_MOVE = 0;
-    public static final int TOOL_ERASE_SOFT = 1;
-    public static final int TOOL_ERASE_HARD = 2;
-    public static final int TOOL_RESTORE = 3;
-    public static final int TOOL_MAGIC = 4;
-    public static final int TOOL_RECT = 5;
-
-    public interface ZoomListener {
-        void onZoomChanged(float percent);
-    }
-
-    private ZoomListener zoomListener;
-
-    private Bitmap original;
-    private Bitmap work;
+    private Bitmap originalBitmap;
+    private Bitmap workBitmap;
     private Canvas workCanvas;
 
-    private final Paint imagePaint;
-    private final Paint hardErase;
-    private final Paint softErase;
-    private final Paint restorePaint;
-    private final Paint checkerDark;
-    private final Paint checkerLight;
-    private final Paint maskDrawPaint;
-    private final Paint maskPreviewPaint;
+    private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint erasePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private final Matrix matrix = new Matrix();
-    private final Matrix inverse = new Matrix();
-
-    private final ScaleGestureDetector scaleDetector;
-
-    private final ArrayDeque<Bitmap> undoStack = new ArrayDeque<>();
-    private final ArrayDeque<Bitmap> redoStack = new ArrayDeque<>();
-
-    private int tool = TOOL_ERASE_SOFT;
-    private int tolerance = 60;
-    private int edgeSoftness = 35;
-    private boolean holeRecognition = true;
-
-    private float brushSize = 35f;
+    private boolean wandEnabled = false;
+    private boolean checkerBackground = true;
 
     private float scale = 1f;
     private float minScale = 1f;
-    private final float maxZoomFactor = 80f;
-    private float moveX = 0f;
-    private float moveY = 0f;
-    private float rotationDegrees = 0f;
+    private float maxScale = 8f;
 
-    private float lastPanX;
-    private float lastPanY;
-    private float lastFingerAngle;
-    private boolean panning = false;
+    private float offsetX = 0f;
+    private float offsetY = 0f;
 
-    private float lastX;
-    private float lastY;
-    private boolean drawing = false;
+    private float lastX = 0f;
+    private float lastY = 0f;
 
-    private boolean suppressSingleAfterMulti = false;
+    private float downX = 0f;
+    private float downY = 0f;
 
-    private Bitmap limitMask;
-    private Canvas limitMaskCanvas;
-    private boolean hasMaskLimit = false;
-    private boolean drawingMask = false;
-    private float maskLastX;
-    private float maskLastY;
+    private boolean isDragging = false;
+    private boolean isScaling = false;
+    private boolean hasMovedWhileWand = false;
 
-    private boolean pendingMagicTap = false;
-    private float magicTapX;
-    private float magicTapY;
-    private float magicDownScreenX;
-    private float magicDownScreenY;
+    private int tolerance = 28;
+    private float eraserSizeScreen = 42f;
 
-    private int transparencyMode = 0;
+    private ScaleGestureDetector scaleDetector;
 
     public EditorCanvasView(Context context) {
         super(context);
+        init(context);
+    }
+
+    public EditorCanvasView(Context context, AttributeSet attrs) {
+        super(context, attrs);
+        init(context);
+    }
+
+    public EditorCanvasView(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+        init(context);
+    }
+
+    private void init(Context context) {
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
-        imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-
-        checkerDark = new Paint(Paint.ANTI_ALIAS_FLAG);
-        checkerDark.setColor(Color.rgb(150, 150, 150));
-
-        checkerLight = new Paint(Paint.ANTI_ALIAS_FLAG);
-        checkerLight.setColor(Color.rgb(225, 225, 225));
-
-        hardErase = new Paint(Paint.ANTI_ALIAS_FLAG);
-        hardErase.setStyle(Paint.Style.STROKE);
-        hardErase.setStrokeCap(Paint.Cap.ROUND);
-        hardErase.setStrokeJoin(Paint.Join.ROUND);
-        hardErase.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
-
-        softErase = new Paint(Paint.ANTI_ALIAS_FLAG);
-        softErase.setStyle(Paint.Style.STROKE);
-        softErase.setStrokeCap(Paint.Cap.ROUND);
-        softErase.setStrokeJoin(Paint.Join.ROUND);
-        softErase.setAlpha(150);
-        softErase.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
-
-        restorePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        restorePaint.setStyle(Paint.Style.STROKE);
-        restorePaint.setStrokeCap(Paint.Cap.ROUND);
-        restorePaint.setStrokeJoin(Paint.Join.ROUND);
-
-        maskDrawPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        maskDrawPaint.setStyle(Paint.Style.STROKE);
-        maskDrawPaint.setStrokeCap(Paint.Cap.ROUND);
-        maskDrawPaint.setStrokeJoin(Paint.Join.ROUND);
-        maskDrawPaint.setColor(Color.WHITE);
-
-        maskPreviewPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        maskPreviewPaint.setAlpha(95);
+        erasePaint.setAntiAlias(true);
+        erasePaint.setStyle(Paint.Style.STROKE);
+        erasePaint.setStrokeCap(Paint.Cap.ROUND);
+        erasePaint.setStrokeJoin(Paint.Join.ROUND);
+        erasePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+        erasePaint.setMaskFilter(new BlurMaskFilter(1.2f, BlurMaskFilter.Blur.NORMAL));
 
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+
+            @Override
+            public boolean onScaleBegin(ScaleGestureDetector detector) {
+                isScaling = true;
+                return true;
+            }
+
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
-                if (work == null) return false;
+                float oldScale = scale;
+                scale *= detector.getScaleFactor();
 
-                suppressSingleAfterMulti = true;
-                drawing = false;
-                drawingMask = false;
-                pendingMagicTap = false;
+                if (scale < minScale) scale = minScale;
+                if (scale > maxScale) scale = maxScale;
 
                 float focusX = detector.getFocusX();
                 float focusY = detector.getFocusY();
-                float[] fixedBitmapPoint = toBitmapPoint(focusX, focusY);
 
-                float oldScale = scale;
-                scale *= detector.getScaleFactor();
-                scale = Math.max(minScale, Math.min(scale, minScale * maxZoomFactor));
+                offsetX = focusX - ((focusX - offsetX) * scale / oldScale);
+                offsetY = focusY - ((focusY - offsetY) * scale / oldScale);
 
-                if (oldScale != scale) {
-                    buildMatrix();
-                    float[] fixedScreenPoint = new float[]{fixedBitmapPoint[0], fixedBitmapPoint[1]};
-                    matrix.mapPoints(fixedScreenPoint);
-                    moveX += focusX - fixedScreenPoint[0];
-                    moveY += focusY - fixedScreenPoint[1];
-                }
-
-                limitMove();
-                notifyZoom();
+                limitPosition();
                 invalidate();
                 return true;
+            }
+
+            @Override
+            public void onScaleEnd(ScaleGestureDetector detector) {
+                isScaling = false;
             }
         });
     }
 
-    public void setZoomListener(ZoomListener listener) {
-        zoomListener = listener;
-    }
+    public void setBitmap(Bitmap bitmap) {
+        if (bitmap == null) return;
 
-    public boolean hasImage() {
-        return work != null;
-    }
+        Bitmap fixed = bitmap.copy(Bitmap.Config.ARGB_8888, true);
 
-    public Bitmap getOutputBitmap() {
-        return work;
+        originalBitmap = fixed.copy(Bitmap.Config.ARGB_8888, true);
+        workBitmap = fixed.copy(Bitmap.Config.ARGB_8888, true);
+        workCanvas = new Canvas(workBitmap);
+
+        post(new Runnable() {
+            @Override
+            public void run() {
+                fitImageToScreen();
+                invalidate();
+            }
+        });
     }
 
     public void setImage(Bitmap bitmap) {
-        original = bitmap.copy(Bitmap.Config.ARGB_8888, true);
-        work = bitmap.copy(Bitmap.Config.ARGB_8888, true);
-        workCanvas = new Canvas(work);
-
-        restorePaint.setShader(new BitmapShader(original, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
-
-        limitMask = Bitmap.createBitmap(work.getWidth(), work.getHeight(), Bitmap.Config.ARGB_8888);
-        limitMask.eraseColor(Color.TRANSPARENT);
-        limitMaskCanvas = new Canvas(limitMask);
-
-        undoStack.clear();
-        redoStack.clear();
-        hasMaskLimit = false;
-        drawingMask = false;
-        pendingMagicTap = false;
-
-        post(this::resetView);
-        invalidate();
+        setBitmap(bitmap);
     }
 
-    public void setTool(int newTool) {
-        tool = newTool;
+    public void setImageBitmap(Bitmap bitmap) {
+        setBitmap(bitmap);
+    }
 
-        if (tool == TOOL_RECT) {
-            Toast.makeText(getContext(), "Dibuja con el dedo la zona donde trabajará la varita.", Toast.LENGTH_SHORT).show();
+    public void loadImageFromUri(Context context, Uri uri) {
+        try {
+            InputStream inputStream = context.getContentResolver().openInputStream(uri);
+            Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+            if (inputStream != null) inputStream.close();
+
+            if (bitmap != null) {
+                setBitmap(bitmap);
+            }
+        } catch (Exception ignored) {
         }
     }
 
-    public void setBrushSize(int size) {
-        brushSize = Math.max(1, size);
+    public Bitmap getBitmap() {
+        return workBitmap;
+    }
+
+    public Bitmap getEditedBitmap() {
+        return workBitmap;
+    }
+
+    public Bitmap exportBitmap() {
+        return workBitmap;
+    }
+
+    public void resetImage() {
+        if (originalBitmap == null) return;
+
+        workBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true);
+        workCanvas = new Canvas(workBitmap);
+        invalidate();
+    }
+
+    public void reset() {
+        resetImage();
+    }
+
+    public void toggleWand() {
+        wandEnabled = !wandEnabled;
+        invalidate();
+    }
+
+    public void toggleMagicWand() {
+        toggleWand();
+    }
+
+    public void setWandEnabled(boolean enabled) {
+        wandEnabled = enabled;
+        invalidate();
+    }
+
+    public void setMagicWandEnabled(boolean enabled) {
+        setWandEnabled(enabled);
+    }
+
+    public boolean isWandEnabled() {
+        return wandEnabled;
+    }
+
+    public boolean isMagicWandEnabled() {
+        return wandEnabled;
+    }
+
+    public void toggleCheckerBackground() {
+        checkerBackground = !checkerBackground;
+        invalidate();
+    }
+
+    public void setCheckerBackground(boolean enabled) {
+        checkerBackground = enabled;
+        invalidate();
+    }
+
+    public void setCheckerBackgroundEnabled(boolean enabled) {
+        setCheckerBackground(enabled);
+    }
+
+    public boolean isCheckerBackgroundEnabled() {
+        return checkerBackground;
     }
 
     public void setTolerance(int value) {
-        tolerance = Math.max(1, Math.min(180, value));
+        if (value < 5) value = 5;
+        if (value > 100) value = 100;
+        tolerance = value;
     }
 
-    public void setEdgeSoftness(int value) {
-        edgeSoftness = Math.max(0, Math.min(100, value));
-        int alpha = 100 + (edgeSoftness * 120 / 100);
-        softErase.setAlpha(alpha);
+    public int getTolerance() {
+        return tolerance;
     }
 
-    public void setHoleRecognitionEnabled(boolean enabled) {
-        holeRecognition = enabled;
+    public void setEraserSize(float size) {
+        if (size < 10f) size = 10f;
+        if (size > 160f) size = 160f;
+        eraserSizeScreen = size;
     }
 
-    public void resetView() {
-        if (work == null || getWidth() <= 0 || getHeight() <= 0) return;
+    public float getEraserSize() {
+        return eraserSizeScreen;
+    }
 
-        float sx = getWidth() / (float) work.getWidth();
-        float sy = getHeight() / (float) work.getHeight();
-
-        minScale = Math.min(sx, sy) * 0.92f;
-        scale = minScale;
-        moveX = 0f;
-        moveY = 0f;
-        rotationDegrees = 0f;
-
-        notifyZoom();
+    public void zoomIn() {
+        scale *= 1.2f;
+        if (scale > maxScale) scale = maxScale;
+        limitPosition();
         invalidate();
     }
 
-    public void clearRectLimit() {
-        clearMagicMask();
-    }
-
-    public void clearMagicMask() {
-        hasMaskLimit = false;
-        drawingMask = false;
-        pendingMagicTap = false;
-        if (limitMask != null) {
-            limitMask.eraseColor(Color.TRANSPARENT);
-            limitMaskCanvas = new Canvas(limitMask);
-        }
+    public void zoomOut() {
+        scale /= 1.2f;
+        if (scale < minScale) scale = minScale;
+        limitPosition();
         invalidate();
     }
 
-    public String cycleTransparencyBackground() {
-        transparencyMode = (transparencyMode + 1) % 3;
-        invalidate();
+    public void fitImageToScreen() {
+        if (workBitmap == null || getWidth() == 0 || getHeight() == 0) return;
 
-        if (transparencyMode == 1) return "Fondo blanco";
-        if (transparencyMode == 2) return "Fondo negro";
-        return "Cuadros de transparencia";
+        float viewW = getWidth();
+        float viewH = getHeight();
+
+        float imgW = workBitmap.getWidth();
+        float imgH = workBitmap.getHeight();
+
+        scale = Math.min(viewW / imgW, viewH / imgH);
+        minScale = scale;
+
+        offsetX = (viewW - imgW * scale) / 2f;
+        offsetY = (viewH - imgH * scale) / 2f;
+
+        limitPosition();
     }
 
-    public void undo() {
-        if (undoStack.isEmpty()) {
-            Toast.makeText(getContext(), "No hay cambios para deshacer.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        if (work != null) {
-            redoStack.addLast(work.copy(Bitmap.Config.ARGB_8888, true));
-        }
-
-        work = undoStack.removeLast();
-        workCanvas = new Canvas(work);
-        restorePaint.setShader(new BitmapShader(original, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
-        invalidate();
-    }
-
-    public void redo() {
-        if (redoStack.isEmpty()) {
-            Toast.makeText(getContext(), "No hay cambios para rehacer.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        if (work != null) {
-            undoStack.addLast(work.copy(Bitmap.Config.ARGB_8888, true));
-        }
-
-        work = redoStack.removeLast();
-        workCanvas = new Canvas(work);
-        restorePaint.setShader(new BitmapShader(original, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
-        invalidate();
-    }
-
-    private void saveUndo() {
-        if (work == null) return;
-
-        if (undoStack.size() >= 12) {
-            undoStack.removeFirst();
-        }
-
-        undoStack.addLast(work.copy(Bitmap.Config.ARGB_8888, true));
-        redoStack.clear();
-    }
-
-    private void notifyZoom() {
-        if (zoomListener != null && minScale > 0) {
-            zoomListener.onZoomChanged((scale / minScale) * 100f);
-        }
+    @Override
+    protected void onSizeChanged(int w, int h, int oldW, int oldH) {
+        super.onSizeChanged(w, h, oldW, oldH);
+        fitImageToScreen();
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        drawTransparentBackground(canvas);
+        drawBackground(canvas);
 
-        if (work == null) {
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setColor(Color.WHITE);
-            p.setTextSize(sp(18));
-            p.setTextAlign(Paint.Align.CENTER);
-            canvas.drawText("Abre una imagen", getWidth() / 2f, getHeight() / 2f, p);
-            return;
+        if (workBitmap != null) {
+            canvas.save();
+            canvas.translate(offsetX, offsetY);
+            canvas.scale(scale, scale);
+            canvas.drawBitmap(workBitmap, 0, 0, imagePaint);
+            canvas.restore();
+        } else {
+            bgPaint.setColor(Color.WHITE);
+            bgPaint.setTextSize(42f);
+            bgPaint.setTextAlign(Paint.Align.CENTER);
+            canvas.drawText("Abre una imagen", getWidth() / 2f, getHeight() / 2f, bgPaint);
         }
-
-        buildMatrix();
-        canvas.drawBitmap(work, matrix, imagePaint);
-        drawMagicMask(canvas);
     }
 
-    private void drawTransparentBackground(Canvas canvas) {
-        if (transparencyMode == 1) {
-            canvas.drawColor(Color.WHITE);
+    private void drawBackground(Canvas canvas) {
+        if (!checkerBackground) {
+            canvas.drawColor(Color.rgb(30, 30, 30));
             return;
         }
 
-        if (transparencyMode == 2) {
-            canvas.drawColor(Color.BLACK);
-            return;
-        }
+        int size = 38;
 
-        canvas.drawColor(Color.WHITE);
-
-        if (work == null) return;
-
-        buildMatrix();
-        canvas.save();
-        canvas.concat(matrix);
-        canvas.clipRect(0, 0, work.getWidth(), work.getHeight());
-
-        final float density = getResources().getDisplayMetrics().density;
-        int size = Math.max(6, (int) (8 * density));
-
-        Paint light = checkerLight;
-        Paint dark = checkerDark;
-        light.setColor(Color.rgb(232, 232, 232));
-        dark.setColor(Color.rgb(178, 178, 178));
-
-        for (int y = 0; y < work.getHeight(); y += size) {
-            for (int x = 0; x < work.getWidth(); x += size) {
-                boolean alt = ((x / size) + (y / size)) % 2 == 0;
-                canvas.drawRect(x, y, x + size, y + size, alt ? light : dark);
+        for (int y = 0; y < getHeight(); y += size) {
+            for (int x = 0; x < getWidth(); x += size) {
+                boolean isWhite = ((x / size) + (y / size)) % 2 == 0;
+                bgPaint.setColor(isWhite ? Color.WHITE : Color.rgb(32, 32, 32));
+                canvas.drawRect(x, y, x + size, y + size, bgPaint);
             }
         }
-
-        canvas.restore();
-    }
-
-    private void drawMagicMask(Canvas canvas) {
-        if (!hasMaskLimit || limitMask == null || work == null) return;
-
-        buildMatrix();
-        canvas.drawBitmap(limitMask, matrix, maskPreviewPaint);
-    }
-
-    private void buildMatrix() {
-        matrix.reset();
-
-        if (work != null) {
-            matrix.postTranslate(-work.getWidth() / 2f, -work.getHeight() / 2f);
-            matrix.postScale(scale, scale);
-            matrix.postRotate(rotationDegrees);
-            matrix.postTranslate(getWidth() / 2f + moveX, getHeight() / 2f + moveY);
-        }
-
-        matrix.invert(inverse);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (work == null) return true;
+        if (workBitmap == null) return true;
 
-        getParent().requestDisallowInterceptTouchEvent(true);
         scaleDetector.onTouchEvent(event);
-
-        if (event.getPointerCount() >= 2) {
-            suppressSingleAfterMulti = true;
-            drawing = false;
-            drawingMask = false;
-            pendingMagicTap = false;
-            handleTwoFinger(event);
-            return true;
-        }
 
         int action = event.getActionMasked();
 
-        if (suppressSingleAfterMulti) {
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                suppressSingleAfterMulti = false;
-                panning = false;
-            }
+        if (event.getPointerCount() > 1) {
+            isScaling = true;
             return true;
         }
 
-        if (!scaleDetector.isInProgress()) {
-            handleOneFinger(event);
+        float x = event.getX();
+        float y = event.getY();
+
+        switch (action) {
+
+            case MotionEvent.ACTION_DOWN:
+                downX = x;
+                downY = y;
+                lastX = x;
+                lastY = y;
+                isDragging = true;
+                hasMovedWhileWand = false;
+                return true;
+
+            case MotionEvent.ACTION_MOVE:
+                if (isScaling) return true;
+
+                float dx = x - lastX;
+                float dy = y - lastY;
+
+                if (wandEnabled) {
+                    float distance = Math.abs(x - downX) + Math.abs(y - downY);
+
+                    if (distance > 8f) {
+                        hasMovedWhileWand = true;
+                        eraseLineOnBitmap(lastX, lastY, x, y);
+                    }
+
+                    lastX = x;
+                    lastY = y;
+                    invalidate();
+                    return true;
+                }
+
+                if (isDragging) {
+                    offsetX += dx;
+                    offsetY += dy;
+
+                    lastX = x;
+                    lastY = y;
+
+                    limitPosition();
+                    invalidate();
+                }
+
+                return true;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                if (wandEnabled && !isScaling) {
+                    float totalMove = Math.abs(x - downX) + Math.abs(y - downY);
+
+                    if (!hasMovedWhileWand && totalMove < 15f) {
+                        eraseSimilarArea(x, y);
+                    }
+                }
+
+                isDragging = false;
+                isScaling = false;
+                hasMovedWhileWand = false;
+                invalidate();
+                return true;
         }
 
         return true;
     }
 
-    private void handleTwoFinger(MotionEvent event) {
-        int action = event.getActionMasked();
+    private void eraseLineOnBitmap(float screenX1, float screenY1, float screenX2, float screenY2) {
+        if (workBitmap == null || workCanvas == null) return;
 
-        if (event.getPointerCount() < 2) {
-            panning = false;
+        float x1 = screenToBitmapX(screenX1);
+        float y1 = screenToBitmapY(screenY1);
+        float x2 = screenToBitmapX(screenX2);
+        float y2 = screenToBitmapY(screenY2);
+
+        if (!isInsideBitmap(x1, y1) && !isInsideBitmap(x2, y2)) return;
+
+        float stroke = eraserSizeScreen / scale;
+        if (stroke < 4f) stroke = 4f;
+        if (stroke > 120f) stroke = 120f;
+
+        erasePaint.setStrokeWidth(stroke);
+
+        workCanvas.drawLine(x1, y1, x2, y2, erasePaint);
+        workCanvas.drawCircle(x2, y2, stroke / 2f, erasePaint);
+    }
+
+    private void eraseSimilarArea(float screenX, float screenY) {
+        if (workBitmap == null) return;
+
+        int startX = (int) screenToBitmapX(screenX);
+        int startY = (int) screenToBitmapY(screenY);
+
+        if (startX < 0 || startY < 0 || startX >= workBitmap.getWidth() || startY >= workBitmap.getHeight()) {
             return;
         }
 
-        float cx = (event.getX(0) + event.getX(1)) / 2f;
-        float cy = (event.getY(0) + event.getY(1)) / 2f;
-        float angle = getTwoFingerAngle(event);
-
-        if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_DOWN) {
-            panning = true;
-            lastPanX = cx;
-            lastPanY = cy;
-            lastFingerAngle = angle;
-        } else if (action == MotionEvent.ACTION_MOVE && panning) {
-            float[] fixedBitmapPoint = toBitmapPoint(lastPanX, lastPanY);
-            float angleDelta = normalizeAngle(angle - lastFingerAngle);
-
-            rotationDegrees = normalizeRotation(rotationDegrees + angleDelta);
-            moveX += cx - lastPanX;
-            moveY += cy - lastPanY;
-
-            buildMatrix();
-            float[] fixedScreenPoint = new float[]{fixedBitmapPoint[0], fixedBitmapPoint[1]};
-            matrix.mapPoints(fixedScreenPoint);
-            moveX += cx - fixedScreenPoint[0];
-            moveY += cy - fixedScreenPoint[1];
-
-            lastPanX = cx;
-            lastPanY = cy;
-            lastFingerAngle = angle;
-
-            limitMove();
-            notifyZoom();
-            invalidate();
-        } else if (action == MotionEvent.ACTION_POINTER_UP || action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            panning = false;
-        }
+        floodErase(startX, startY);
+        softenEdges();
+        invalidate();
     }
 
-    private float getTwoFingerAngle(MotionEvent event) {
-        float dx = event.getX(1) - event.getX(0);
-        float dy = event.getY(1) - event.getY(0);
-        return (float) Math.toDegrees(Math.atan2(dy, dx));
+    private void floodErase(int startX, int startY) {
+        int width = workBitmap.getWidth();
+        int height = workBitmap.getHeight();
+
+        int targetColor = workBitmap.getPixel(startX, startY);
+
+        if (Color.alpha(targetColor) == 0) return;
+
+        int[] pixels = new int[width * height];
+        workBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+
+        boolean[] visited = new boolean[width * height];
+
+        ArrayDeque<Point> queue = new ArrayDeque<>();
+        queue.add(new Point(startX, startY));
+
+        while (!queue.isEmpty()) {
+            Point p = queue.removeFirst();
+
+            int x = p.x;
+            int y = p.y;
+
+            if (x < 0 || y < 0 || x >= width || y >= height) continue;
+
+            int index = y * width + x;
+
+            if (visited[index]) continue;
+            visited[index] = true;
+
+            int currentColor = pixels[index];
+
+            if (!isSimilarColor(targetColor, currentColor)) continue;
+
+            pixels[index] = Color.TRANSPARENT;
+
+            queue.add(new Point(x + 1, y));
+            queue.add(new Point(x - 1, y));
+            queue.add(new Point(x, y + 1));
+            queue.add(new Point(x, y - 1));
+
+            queue.add(new Point(x + 1, y + 1));
+            queue.add(new Point(x - 1, y - 1));
+            queue.add(new Point(x + 1, y - 1));
+            queue.add(new Point(x - 1, y + 1));
+        }
+
+        workBitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+        workCanvas = new Canvas(workBitmap);
     }
 
-    private float normalizeAngle(float value) {
-        while (value > 180f) value -= 360f;
-        while (value < -180f) value += 360f;
-        return value;
+    private boolean isSimilarColor(int target, int current) {
+        if (Color.alpha(current) == 0) return false;
+
+        int r1 = Color.red(target);
+        int g1 = Color.green(target);
+        int b1 = Color.blue(target);
+
+        int r2 = Color.red(current);
+        int g2 = Color.green(current);
+        int b2 = Color.blue(current);
+
+        int diffR = Math.abs(r1 - r2);
+        int diffG = Math.abs(g1 - g2);
+        int diffB = Math.abs(b1 - b2);
+
+        return diffR <= tolerance && diffG <= tolerance && diffB <= tolerance;
     }
 
-    private float normalizeRotation(float value) {
-        while (value >= 360f) value -= 360f;
-        while (value <= -360f) value += 360f;
-        return value;
-    }
+    private void softenEdges() {
+        if (workBitmap == null) return;
 
-    private void handleOneFinger(MotionEvent event) {
-        int action = event.getActionMasked();
+        int width = workBitmap.getWidth();
+        int height = workBitmap.getHeight();
 
-        if (tool == TOOL_MOVE) {
-            handleMoveTool(event);
-            return;
-        }
+        Bitmap copy = workBitmap.copy(Bitmap.Config.ARGB_8888, true);
 
-        float[] point = toBitmapPoint(event.getX(), event.getY());
-        float x = point[0];
-        float y = point[1];
+        for (int y = 1; y < height - 1; y++) {
+            for (int x = 1; x < width - 1; x++) {
+                int color = copy.getPixel(x, y);
 
-        if (x < 0 || y < 0 || x >= work.getWidth() || y >= work.getHeight()) {
-            pendingMagicTap = false;
-            return;
-        }
+                if (Color.alpha(color) == 0) continue;
 
-        if (tool == TOOL_RECT) {
-            handleMaskTool(action, x, y);
-            return;
-        }
+                boolean nearTransparent =
+                        Color.alpha(copy.getPixel(x + 1, y)) == 0 ||
+                        Color.alpha(copy.getPixel(x - 1, y)) == 0 ||
+                        Color.alpha(copy.getPixel(x, y + 1)) == 0 ||
+                        Color.alpha(copy.getPixel(x, y - 1)) == 0 ||
+                        Color.alpha(copy.getPixel(x + 1, y + 1)) == 0 ||
+                        Color.alpha(copy.getPixel(x - 1, y - 1)) == 0 ||
+                        Color.alpha(copy.getPixel(x + 1, y - 1)) == 0 ||
+                        Color.alpha(copy.getPixel(x - 1, y + 1)) == 0;
 
-        if (tool == TOOL_MAGIC) {
-            handleMagicTouch(event, action, x, y);
-            return;
-        }
-
-        if (action == MotionEvent.ACTION_DOWN) {
-            saveUndo();
-            drawing = true;
-            lastX = x;
-            lastY = y;
-            drawStroke(x, y, x + 0.1f, y + 0.1f);
-        } else if (action == MotionEvent.ACTION_MOVE && drawing) {
-            drawStroke(lastX, lastY, x, y);
-            lastX = x;
-            lastY = y;
-        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            drawing = false;
-        }
-    }
-
-    private void handleMoveTool(MotionEvent event) {
-        int action = event.getActionMasked();
-
-        if (action == MotionEvent.ACTION_DOWN) {
-            panning = true;
-            lastPanX = event.getX();
-            lastPanY = event.getY();
-        } else if (action == MotionEvent.ACTION_MOVE && panning) {
-            float dx = event.getX() - lastPanX;
-            float dy = event.getY() - lastPanY;
-            moveX += dx;
-            moveY += dy;
-            lastPanX = event.getX();
-            lastPanY = event.getY();
-            limitMove();
-            invalidate();
-        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            panning = false;
-        }
-    }
-
-    private void handleMagicTouch(MotionEvent event, int action, float x, float y) {
-        if (action == MotionEvent.ACTION_DOWN) {
-            pendingMagicTap = true;
-            magicTapX = x;
-            magicTapY = y;
-            magicDownScreenX = event.getX();
-            magicDownScreenY = event.getY();
-            return;
-        }
-
-        if (action == MotionEvent.ACTION_MOVE && pendingMagicTap) {
-            float dx = event.getX() - magicDownScreenX;
-            float dy = event.getY() - magicDownScreenY;
-            float cancelDistance = Math.max(10f, 10f * getResources().getDisplayMetrics().density);
-
-            if ((dx * dx) + (dy * dy) > cancelDistance * cancelDistance) {
-                pendingMagicTap = false;
+                if (nearTransparent) {
+                    int r = Color.red(color);
+                    int g = Color.green(color);
+                    int b = Color.blue(color);
+                    workBitmap.setPixel(x, y, Color.argb(150, r, g, b));
+                }
             }
-            return;
         }
 
-        if (action == MotionEvent.ACTION_UP) {
-            if (pendingMagicTap) {
-                saveUndo();
-                magicErase((int) magicTapX, (int) magicTapY);
+        workCanvas = new Canvas(workBitmap);
+    }
+
+    private float screenToBitmapX(float screenX) {
+        return (screenX - offsetX) / scale;
+    }
+
+    private float screenToBitmapY(float screenY) {
+        return (screenY - offsetY) / scale;
+    }
+
+    private boolean isInsideBitmap(float x, float y) {
+        if (workBitmap == null) return false;
+        return x >= 0 && y >= 0 && x < workBitmap.getWidth() && y < workBitmap.getHeight();
+    }
+
+    private void limitPosition() {
+        if (workBitmap == null) return;
+
+        float imageW = workBitmap.getWidth() * scale;
+        float imageH = workBitmap.getHeight() * scale;
+
+        if (imageW <= getWidth()) {
+            offsetX = (getWidth() - imageW) / 2f;
+        } else {
+            if (offsetX > 0) offsetX = 0;
+            if (offsetX + imageW < getWidth()) offsetX = getWidth() - imageW;
+        }
+
+        if (imageH <= getHeight()) {
+            offsetY = (getHeight() - imageH) / 2f;
+        } else {
+            if (offsetY > 0) offsetY = 0;
+            if (offsetY + imageH < getHeight()) offsetY = getHeight() - imageH;
+        }
+    }
             }
-            pendingMagicTap = false;
-        } else if (action == MotionEvent.ACTION_CANCEL) {
-            pendingMagicTap = false;
-        }
-    }
-
-    private void handleMaskTool(int action, float x, float y) {
-        if (limitMaskCanvas == null) return;
-
-        float radius = brushSize * (work.getWidth() / 1080f);
-        radius = Math.max(8f, radius * 1.3f);
-        maskDrawPaint.setStrokeWidth(radius * 2f);
-
-        if (action == MotionEvent.ACTION_DOWN) {
-            drawingMask = true;
-            hasMaskLimit = true;
-            maskLastX = x;
-            maskLastY = y;
-            limitMaskCanvas.drawLine(x, y, x + 0.1f, y + 0.1f, maskDrawPaint);
-            invalidate();
-        } else if (action == MotionEvent.ACTION_MOVE && drawingMask) {
-            limitMaskCanvas.drawLine(maskLastX, maskLastY, x, y, maskDrawPaint);
-            maskLastX = x;
-            maskLastY = y;
-            invalidate();
-        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            drawingMask = false;
-            invalidate();
-        }
-    }
-
-    private float[] toBitmapPoint(float sx, float sy) {
-        buildMatrix();
-        float[] p = new float[]{sx, sy};
-        inverse.mapPoints(p);
-        return p;
-    }
-
-    private void drawStroke(float x1, float y1, float x2, float y2) {
-        if (workCanvas == null) return;
-
-        float radius = brushSize * (work.getWidth() / 1080f);
-        radius = Math.max(1.5f, radius);
-
-        float strokeWidth = radius * 2f;
-
-        if (tool == TOOL_ERASE_HARD) {
-            hardErase.setStrokeWidth(strokeWidth);
-            workCanvas.drawLine(x1, y1, x2, y2, hardErase);
-        } else if (tool == TOOL_ERASE_SOFT) {
-            softErase.setStrokeWidth(strokeWidth);
-            workCanvas.drawLine(x1, y1, x2, y2, s
