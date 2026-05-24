@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
@@ -22,15 +23,15 @@ public class EditorCanvasView extends View {
 
     private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint erasePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint lassoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint lassoFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private boolean wandEnabled = false;
     private boolean lassoEnabled = false;
     private boolean checkerBackground = true;
-
     private boolean lassoReady = false;
+    private boolean processingMagic = false;
+
     private Path lassoPath = new Path();
 
     private float scale = 1f;
@@ -42,13 +43,14 @@ public class EditorCanvasView extends View {
 
     private float lastX = 0f;
     private float lastY = 0f;
+    private float downX = 0f;
+    private float downY = 0f;
 
     private boolean dragging = false;
     private boolean scaling = false;
-    private boolean erasedOnMove = false;
 
-    private float eraserSize = 45f;
-    private int edgeSoftness = 3;
+    private int magicTolerance = 35;
+    private int edgeSoftness = 2;
 
     private ScaleGestureDetector scaleDetector;
 
@@ -70,23 +72,16 @@ public class EditorCanvasView extends View {
     private void init(Context context) {
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
-        erasePaint.setStyle(Paint.Style.STROKE);
-        erasePaint.setStrokeCap(Paint.Cap.ROUND);
-        erasePaint.setStrokeJoin(Paint.Join.ROUND);
-        erasePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
-        updateEraserPaint();
-
         lassoPaint.setColor(Color.CYAN);
         lassoPaint.setStyle(Paint.Style.STROKE);
-        lassoPaint.setStrokeWidth(3f);
+        lassoPaint.setStrokeWidth(4f);
         lassoPaint.setStrokeCap(Paint.Cap.ROUND);
         lassoPaint.setStrokeJoin(Paint.Join.ROUND);
 
-        lassoFillPaint.setColor(Color.argb(45, 0, 255, 255));
+        lassoFillPaint.setColor(Color.argb(60, 0, 255, 255));
         lassoFillPaint.setStyle(Paint.Style.FILL);
 
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-
             @Override
             public boolean onScaleBegin(ScaleGestureDetector detector) {
                 scaling = true;
@@ -149,28 +144,54 @@ public class EditorCanvasView extends View {
 
         workBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true);
         workCanvas = new Canvas(workBitmap);
-
         clearLasso();
+        fitImageToScreen();
+        invalidate();
+    }
+
+    public void rotateRight() {
+        if (workBitmap == null || originalBitmap == null) return;
+
+        Matrix matrix = new Matrix();
+        matrix.postRotate(90);
+
+        workBitmap = Bitmap.createBitmap(
+                workBitmap,
+                0, 0,
+                workBitmap.getWidth(),
+                workBitmap.getHeight(),
+                matrix,
+                true
+        );
+
+        originalBitmap = Bitmap.createBitmap(
+                originalBitmap,
+                0, 0,
+                originalBitmap.getWidth(),
+                originalBitmap.getHeight(),
+                matrix,
+                true
+        );
+
+        workCanvas = new Canvas(workBitmap);
+        clearLasso();
+        fitImageToScreen();
         invalidate();
     }
 
     public void toggleWand() {
         wandEnabled = !wandEnabled;
-
         if (wandEnabled) {
             lassoEnabled = false;
         }
-
         invalidate();
     }
 
     public void setWandEnabled(boolean enabled) {
         wandEnabled = enabled;
-
         if (enabled) {
             lassoEnabled = false;
         }
-
         invalidate();
     }
 
@@ -180,23 +201,19 @@ public class EditorCanvasView extends View {
 
     public void toggleLasso() {
         lassoEnabled = !lassoEnabled;
-
         if (lassoEnabled) {
             wandEnabled = false;
             clearLasso();
         }
-
         invalidate();
     }
 
     public void setLassoEnabled(boolean enabled) {
         lassoEnabled = enabled;
-
         if (enabled) {
             wandEnabled = false;
             clearLasso();
         }
-
         invalidate();
     }
 
@@ -209,32 +226,16 @@ public class EditorCanvasView extends View {
         invalidate();
     }
 
-    public void setEraserSize(float size) {
-        if (size < 10f) size = 10f;
-        if (size > 160f) size = 160f;
-
-        eraserSize = size;
-        updateEraserPaint();
-        invalidate();
+    public void setMagicTolerance(int tolerance) {
+        if (tolerance < 5) tolerance = 5;
+        if (tolerance > 100) tolerance = 100;
+        magicTolerance = tolerance;
     }
 
     public void setEdgeSoftness(int softness) {
         if (softness < 0) softness = 0;
-        if (softness > 20) softness = 20;
-
+        if (softness > 10) softness = 10;
         edgeSoftness = softness;
-        updateEraserPaint();
-        invalidate();
-    }
-
-    private void updateEraserPaint() {
-        erasePaint.setStrokeWidth(eraserSize / Math.max(scale, 0.1f));
-
-        if (edgeSoftness <= 0) {
-            erasePaint.setMaskFilter(null);
-        } else {
-            erasePaint.setMaskFilter(new BlurMaskFilter(edgeSoftness, BlurMaskFilter.Blur.NORMAL));
-        }
     }
 
     private void fitImageToScreen() {
@@ -280,12 +281,27 @@ public class EditorCanvasView extends View {
             }
 
             canvas.restore();
+
+            if (processingMagic) {
+                drawProcessing(canvas);
+            }
         } else {
             bgPaint.setColor(Color.WHITE);
             bgPaint.setTextSize(38f);
             bgPaint.setTextAlign(Paint.Align.CENTER);
             canvas.drawText("Pulsa ABRIR", getWidth() / 2f, getHeight() / 2f, bgPaint);
         }
+    }
+
+    private void drawProcessing(Canvas canvas) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(Color.argb(170, 0, 0, 0));
+        canvas.drawRect(0, 0, getWidth(), getHeight(), p);
+
+        p.setColor(Color.WHITE);
+        p.setTextSize(34f);
+        p.setTextAlign(Paint.Align.CENTER);
+        canvas.drawText("Procesando varita...", getWidth() / 2f, getHeight() / 2f, p);
     }
 
     private void drawBackground(Canvas canvas) {
@@ -307,7 +323,7 @@ public class EditorCanvasView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (workBitmap == null) return true;
+        if (workBitmap == null || processingMagic) return true;
 
         if (!wandEnabled && !lassoEnabled) {
             scaleDetector.onTouchEvent(event);
@@ -324,12 +340,12 @@ public class EditorCanvasView extends View {
         float sy = event.getY();
 
         switch (action) {
-
             case MotionEvent.ACTION_DOWN:
+                downX = sx;
+                downY = sy;
                 lastX = sx;
                 lastY = sy;
                 dragging = true;
-                erasedOnMove = false;
 
                 if (lassoEnabled) {
                     float bx = screenToBitmapX(sx);
@@ -341,7 +357,6 @@ public class EditorCanvasView extends View {
                         lassoReady = true;
                     }
                 }
-
                 return true;
 
             case MotionEvent.ACTION_MOVE:
@@ -360,18 +375,7 @@ public class EditorCanvasView extends View {
                     return true;
                 }
 
-                if (wandEnabled) {
-                    eraseLine(lastX, lastY, sx, sy);
-                    erasedOnMove = true;
-
-                    lastX = sx;
-                    lastY = sy;
-
-                    invalidate();
-                    return true;
-                }
-
-                if (dragging) {
+                if (!wandEnabled && dragging) {
                     float dx = sx - lastX;
                     float dy = sy - lastY;
 
@@ -384,7 +388,6 @@ public class EditorCanvasView extends View {
                     limitPosition();
                     invalidate();
                 }
-
                 return true;
 
             case MotionEvent.ACTION_UP:
@@ -393,19 +396,210 @@ public class EditorCanvasView extends View {
                     lassoPath.close();
                 }
 
-                if (wandEnabled && !scaling && !erasedOnMove) {
-                    eraseCircle(sx, sy);
+                if (wandEnabled && !scaling) {
+                    float move = Math.abs(sx - downX) + Math.abs(sy - downY);
+
+                    if (move < 25f) {
+                        applyMagicWand(sx, sy);
+                    }
                 }
 
                 dragging = false;
                 scaling = false;
-                erasedOnMove = false;
-
                 invalidate();
                 return true;
         }
 
         return true;
+    }
+
+    private void applyMagicWand(float screenX, float screenY) {
+        if (workBitmap == null) return;
+
+        final int startX = (int) screenToBitmapX(screenX);
+        final int startY = (int) screenToBitmapY(screenY);
+
+        if (startX < 0 || startY < 0 || startX >= workBitmap.getWidth() || startY >= workBitmap.getHeight()) {
+            return;
+        }
+
+        processingMagic = true;
+        invalidate();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                magicErasePixels(startX, startY);
+                processingMagic = false;
+                postInvalidate();
+            }
+        }).start();
+    }
+
+    private void magicErasePixels(int startX, int startY) {
+        if (workBitmap == null) return;
+
+        int width = workBitmap.getWidth();
+        int height = workBitmap.getHeight();
+        int total = width * height;
+
+        int[] pixels = new int[total];
+        workBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+
+        int startIndex = startY * width + startX;
+        int targetColor = pixels[startIndex];
+
+        if (Color.alpha(targetColor) == 0) return;
+
+        int[] maskPixels = null;
+
+        if (lassoReady) {
+            Bitmap mask = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas maskCanvas = new Canvas(mask);
+
+            Paint maskPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            maskPaint.setColor(Color.WHITE);
+            maskPaint.setStyle(Paint.Style.FILL);
+
+            maskCanvas.drawPath(lassoPath, maskPaint);
+
+            maskPixels = new int[total];
+            mask.getPixels(maskPixels, 0, width, 0, 0, width, height);
+
+            if (Color.alpha(maskPixels[startIndex]) == 0) {
+                mask.recycle();
+                return;
+            }
+
+            mask.recycle();
+        }
+
+        boolean[] visited = new boolean[total];
+        boolean[] erased = new boolean[total];
+
+        int[] queue = new int[total];
+        int head = 0;
+        int tail = 0;
+
+        queue[tail++] = startIndex;
+        visited[startIndex] = true;
+
+        while (head < tail) {
+            int index = queue[head++];
+
+            if (maskPixels != null && Color.alpha(maskPixels[index]) == 0) {
+                continue;
+            }
+
+            int currentColor = pixels[index];
+
+            if (!isSimilarColor(targetColor, currentColor)) {
+                continue;
+            }
+
+            pixels[index] = Color.TRANSPARENT;
+            erased[index] = true;
+
+            int x = index % width;
+            int y = index / width;
+
+            int n;
+
+            if (x > 0) {
+                n = index - 1;
+                if (!visited[n]) {
+                    visited[n] = true;
+                    queue[tail++] = n;
+                }
+            }
+
+            if (x < width - 1) {
+                n = index + 1;
+                if (!visited[n]) {
+                    visited[n] = true;
+                    queue[tail++] = n;
+                }
+            }
+
+            if (y > 0) {
+                n = index - width;
+                if (!visited[n]) {
+                    visited[n] = true;
+                    queue[tail++] = n;
+                }
+            }
+
+            if (y < height - 1) {
+                n = index + width;
+                if (!visited[n]) {
+                    visited[n] = true;
+                    queue[tail++] = n;
+                }
+            }
+        }
+
+        if (edgeSoftness > 0) {
+            softenMagicEdges(pixels, erased, width, height);
+        }
+
+        workBitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+        workCanvas = new Canvas(workBitmap);
+    }
+
+    private boolean isSimilarColor(int target, int current) {
+        if (Color.alpha(current) == 0) return false;
+
+        int r1 = Color.red(target);
+        int g1 = Color.green(target);
+        int b1 = Color.blue(target);
+
+        int r2 = Color.red(current);
+        int g2 = Color.green(current);
+        int b2 = Color.blue(current);
+
+        int diffR = Math.abs(r1 - r2);
+        int diffG = Math.abs(g1 - g2);
+        int diffB = Math.abs(b1 - b2);
+
+        return diffR <= magicTolerance &&
+               diffG <= magicTolerance &&
+               diffB <= magicTolerance;
+    }
+
+    private void softenMagicEdges(int[] pixels, boolean[] erased, int width, int height) {
+        int radius = edgeSoftness;
+        if (radius < 1) radius = 1;
+        if (radius > 5) radius = 5;
+
+        int[] copy = pixels.clone();
+
+        for (int y = radius; y < height - radius; y++) {
+            for (int x = radius; x < width - radius; x++) {
+                int index = y * width + x;
+
+                if (Color.alpha(copy[index]) == 0) continue;
+
+                boolean nearErased = false;
+
+                for (int dy = -radius; dy <= radius && !nearErased; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int ni = (y + dy) * width + (x + dx);
+                        if (erased[ni]) {
+                            nearErased = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (nearErased) {
+                    int c = copy[index];
+                    int r = Color.red(c);
+                    int g = Color.green(c);
+                    int b = Color.blue(c);
+                    pixels[index] = Color.argb(120, r, g, b);
+                }
+            }
+        }
     }
 
     public boolean applyLassoErase() {
@@ -422,7 +616,6 @@ public class EditorCanvasView extends View {
         }
 
         workCanvas.drawPath(lassoPath, clearPaint);
-
         clearLasso();
         invalidate();
 
@@ -432,45 +625,6 @@ public class EditorCanvasView extends View {
     private void clearLasso() {
         lassoPath.reset();
         lassoReady = false;
-    }
-
-    private void eraseLine(float sx1, float sy1, float sx2, float sy2) {
-        if (workBitmap == null || workCanvas == null) return;
-
-        float x1 = screenToBitmapX(sx1);
-        float y1 = screenToBitmapY(sy1);
-        float x2 = screenToBitmapX(sx2);
-        float y2 = screenToBitmapY(sy2);
-
-        if (!isInsideBitmap(x1, y1) && !isInsideBitmap(x2, y2)) return;
-
-        updateEraserPaint();
-
-        workCanvas.drawLine(x1, y1, x2, y2, erasePaint);
-    }
-
-    private void eraseCircle(float sx, float sy) {
-        if (workBitmap == null || workCanvas == null) return;
-
-        float x = screenToBitmapX(sx);
-        float y = screenToBitmapY(sy);
-
-        if (!isInsideBitmap(x, y)) return;
-
-        updateEraserPaint();
-
-        Paint circlePaint = new Paint(erasePaint);
-        circlePaint.setStyle(Paint.Style.FILL);
-        circlePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
-
-        if (edgeSoftness <= 0) {
-            circlePaint.setMaskFilter(null);
-        } else {
-            circlePaint.setMaskFilter(new BlurMaskFilter(edgeSoftness, BlurMaskFilter.Blur.NORMAL));
-        }
-
-        float radius = (eraserSize / Math.max(scale, 0.1f)) / 2f;
-        workCanvas.drawCircle(x, y, radius, circlePaint);
     }
 
     private float screenToBitmapX(float screenX) {
