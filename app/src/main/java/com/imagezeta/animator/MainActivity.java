@@ -1,412 +1,492 @@
-package com.imagezeta.animator;
+package com.example.videozetafixer;
 
-import android.Manifest;
 import android.app.Activity;
+import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.content.ContentValues;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
-import android.provider.MediaStore;
-import android.view.Gravity;
-import android.view.ViewGroup;
-import android.widget.Button;
-import android.widget.CompoundButton;
-import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
-import android.widget.LinearLayout;
-import android.widget.SeekBar;
-import android.widget.Switch;
-import android.widget.TextView;
-import android.widget.Toast;
-
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
+import android.graphics.*;
+import android.view.*;
+import android.widget.*;
+import android.database.Cursor;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.LinkedList;
+import java.util.Queue;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity {
 
-    private EditorCanvasView editor;
-    private TextView zoomText;
-    private TextView toolText;
-    private TextView sizeText;
-    private TextView toleranceText;
-    private TextView softnessText;
+    private static final int PICK_IMAGE = 1001;
 
-    private Button moveButton;
-    private Button softButton;
-    private Button hardButton;
-    private Button restoreButton;
-    private Button magicButton;
-    private Button zoneButton;
-    private Button clearZoneButton;
-    private Button backgroundButton;
-
-    private int currentTool = EditorCanvasView.TOOL_ERASE_SOFT;
-    private boolean magicEnabled = false;
-
-    private final ActivityResultLauncher<Intent> imagePicker = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> {
-                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
-                    Uri uri = result.getData().getData();
-                    if (uri != null) {
-                        loadImage(uri);
-                    }
-                }
-            }
-    );
+    private EditorView editorView;
+    private Button btnOpen, btnWand, btnBg, btnReset, btnSave;
 
     @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        requestPermissionIfNeeded();
+        LinearLayout main = new LinearLayout(this);
+        main.setOrientation(LinearLayout.VERTICAL);
+        main.setBackgroundColor(Color.BLACK);
 
-        FrameLayout root = new FrameLayout(this);
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(8, 8, 8, 8);
+        bar.setBackgroundColor(Color.rgb(25, 25, 25));
 
-        editor = new EditorCanvasView(this);
-        root.addView(editor, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+        btnOpen = new Button(this);
+        btnOpen.setText("Abrir");
+
+        btnWand = new Button(this);
+        btnWand.setText("Varita OFF");
+
+        btnBg = new Button(this);
+        btnBg.setText("Fondo B/N");
+
+        btnReset = new Button(this);
+        btnReset.setText("Reset");
+
+        btnSave = new Button(this);
+        btnSave.setText("Guardar");
+
+        bar.addView(btnOpen, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        bar.addView(btnWand, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        bar.addView(btnBg, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        bar.addView(btnReset, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        bar.addView(btnSave, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        editorView = new EditorView(this);
+
+        main.addView(bar);
+        main.addView(editorView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1
         ));
 
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(8), dp(8), dp(8), dp(8));
-        panel.setBackgroundColor(0xCC111111);
+        setContentView(main);
 
-        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        panelParams.gravity = Gravity.BOTTOM;
-        root.addView(panel, panelParams);
+        btnOpen.setOnClickListener(v -> openImage());
 
-        zoomText = makeLabel("Zoom: 100%");
-        toolText = makeLabel("Herramienta: Borrador suave");
-
-        panel.addView(zoomText);
-        panel.addView(toolText);
-
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        scroll.addView(buttons);
-        panel.addView(scroll);
-
-        Button openButton = makeButton("Abrir");
-        openButton.setOnClickListener(v -> openImagePicker());
-        buttons.addView(openButton);
-
-        moveButton = makeButton("Mover");
-        moveButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_MOVE));
-        buttons.addView(moveButton);
-
-        softButton = makeButton("Borrar suave");
-        softButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_ERASE_SOFT));
-        buttons.addView(softButton);
-
-        hardButton = makeButton("Borrar duro");
-        hardButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_ERASE_HARD));
-        buttons.addView(hardButton);
-
-        restoreButton = makeButton("Restaurar");
-        restoreButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_RESTORE));
-        buttons.addView(restoreButton);
-
-        magicButton = makeButton("Varita OFF");
-        magicButton.setOnClickListener(v -> toggleMagic());
-        buttons.addView(magicButton);
-
-        zoneButton = makeButton("Zona");
-        zoneButton.setOnClickListener(v -> setTool(EditorCanvasView.TOOL_RECT));
-        buttons.addView(zoneButton);
-
-        clearZoneButton = makeButton("Limpiar zona");
-        clearZoneButton.setOnClickListener(v -> editor.clearMagicMask());
-        buttons.addView(clearZoneButton);
-
-        backgroundButton = makeButton("Fondo");
-        backgroundButton.setOnClickListener(v -> {
-            String name = editor.cycleTransparencyBackground();
-            Toast.makeText(this, name, Toast.LENGTH_SHORT).show();
+        btnWand.setOnClickListener(v -> {
+            editorView.toggleWand();
+            btnWand.setText(editorView.isWandEnabled() ? "Varita ON" : "Varita OFF");
         });
-        buttons.addView(backgroundButton);
 
-        Button undoButton = makeButton("Deshacer");
-        undoButton.setOnClickListener(v -> editor.undo());
-        buttons.addView(undoButton);
+        btnBg.setOnClickListener(v -> editorView.toggleCheckerBackground());
 
-        Button redoButton = makeButton("Rehacer");
-        redoButton.setOnClickListener(v -> editor.redo());
-        buttons.addView(redoButton);
+        btnReset.setOnClickListener(v -> editorView.resetImage());
 
-        Button resetButton = makeButton("Reset vista");
-        resetButton.setOnClickListener(v -> editor.resetView());
-        buttons.addView(resetButton);
+        btnSave.setOnClickListener(v -> saveImage());
+    }
 
-        Button saveButton = makeButton("Guardar PNG");
-        saveButton.setOnClickListener(v -> saveImage());
-        buttons.addView(saveButton);
+    private void openImage() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("image/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, PICK_IMAGE);
+    }
 
-        sizeText = makeLabel("Tamaño: 35");
-        panel.addView(sizeText);
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
 
-        SeekBar sizeSeek = new SeekBar(this);
-        sizeSeek.setMax(150);
-        sizeSeek.setProgress(35);
-        sizeSeek.setOnSeekBarChangeListener(new SimpleSeekBar() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int value = Math.max(1, progress);
-                sizeText.setText("Tamaño: " + value);
-                editor.setBrushSize(value);
+        if (requestCode == PICK_IMAGE && resultCode == RESULT_OK && data != null) {
+            try {
+                Uri uri = data.getData();
+                InputStream inputStream = getContentResolver().openInputStream(uri);
+                Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+
+                if (bitmap != null) {
+                    editorView.setImage(bitmap);
+                    Toast.makeText(this, "Imagen cargada", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, "No se pudo abrir la imagen", Toast.LENGTH_SHORT).show();
+                }
+
+            } catch (Exception e) {
+                Toast.makeText(this, "Error al abrir imagen", Toast.LENGTH_SHORT).show();
             }
-        });
-        panel.addView(sizeSeek);
-
-        toleranceText = makeLabel("Tolerancia varita: 60");
-        panel.addView(toleranceText);
-
-        SeekBar toleranceSeek = new SeekBar(this);
-        toleranceSeek.setMax(180);
-        toleranceSeek.setProgress(60);
-        toleranceSeek.setOnSeekBarChangeListener(new SimpleSeekBar() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int value = Math.max(1, progress);
-                toleranceText.setText("Tolerancia varita: " + value);
-                editor.setTolerance(value);
-            }
-        });
-        panel.addView(toleranceSeek);
-
-        softnessText = makeLabel("Suavidad borde: 35");
-        panel.addView(softnessText);
-
-        SeekBar softnessSeek = new SeekBar(this);
-        softnessSeek.setMax(100);
-        softnessSeek.setProgress(35);
-        softnessSeek.setOnSeekBarChangeListener(new SimpleSeekBar() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                softnessText.setText("Suavidad borde: " + progress);
-                editor.setEdgeSoftness(progress);
-            }
-        });
-        panel.addView(softnessSeek);
-
-        Switch holesSwitch = new Switch(this);
-        holesSwitch.setText("Huecos / continuidad diagonal");
-        holesSwitch.setTextColor(0xFFFFFFFF);
-        holesSwitch.setChecked(true);
-        holesSwitch.setOnCheckedChangeListener((CompoundButton buttonView, boolean isChecked) ->
-                editor.setHoleRecognitionEnabled(isChecked)
-        );
-        panel.addView(holesSwitch);
-
-        editor.setZoomListener(percent ->
-                zoomText.setText("Zoom: " + Math.round(percent) + "%")
-        );
-
-        setContentView(root);
-        updateButtonStates();
-    }
-
-    private void toggleMagic() {
-        magicEnabled = !magicEnabled;
-
-        if (magicEnabled) {
-            setTool(EditorCanvasView.TOOL_MAGIC);
-        } else {
-            setTool(EditorCanvasView.TOOL_MOVE);
-        }
-
-        updateButtonStates();
-    }
-
-    private void setTool(int tool) {
-        currentTool = tool;
-        editor.setTool(tool);
-
-        if (tool == EditorCanvasView.TOOL_MAGIC) {
-            magicEnabled = true;
-            toolText.setText("Herramienta: Varita ON");
-        } else if (tool == EditorCanvasView.TOOL_MOVE) {
-            magicEnabled = false;
-            toolText.setText("Herramienta: Mover / Zoom normal");
-        } else if (tool == EditorCanvasView.TOOL_ERASE_SOFT) {
-            magicEnabled = false;
-            toolText.setText("Herramienta: Borrador suave");
-        } else if (tool == EditorCanvasView.TOOL_ERASE_HARD) {
-            magicEnabled = false;
-            toolText.setText("Herramienta: Borrador duro");
-        } else if (tool == EditorCanvasView.TOOL_RESTORE) {
-            magicEnabled = false;
-            toolText.setText("Herramienta: Restaurar");
-        } else if (tool == EditorCanvasView.TOOL_RECT) {
-            magicEnabled = false;
-            toolText.setText("Herramienta: Dibujar zona de varita");
-        }
-
-        updateButtonStates();
-    }
-
-    private void updateButtonStates() {
-        if (magicButton != null) {
-            magicButton.setText(magicEnabled ? "Varita ON" : "Varita OFF");
-        }
-
-        setButtonSelected(moveButton, currentTool == EditorCanvasView.TOOL_MOVE);
-        setButtonSelected(softButton, currentTool == EditorCanvasView.TOOL_ERASE_SOFT);
-        setButtonSelected(hardButton, currentTool == EditorCanvasView.TOOL_ERASE_HARD);
-        setButtonSelected(restoreButton, currentTool == EditorCanvasView.TOOL_RESTORE);
-        setButtonSelected(magicButton, currentTool == EditorCanvasView.TOOL_MAGIC);
-        setButtonSelected(zoneButton, currentTool == EditorCanvasView.TOOL_RECT);
-    }
-
-    private void setButtonSelected(Button button, boolean selected) {
-        if (button == null) return;
-        button.setAlpha(selected ? 1f : 0.72f);
-    }
-
-    private TextView makeLabel(String text) {
-        TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextColor(0xFFFFFFFF);
-        label.setTextSize(14);
-        label.setPadding(dp(4), dp(2), dp(4), dp(2));
-        return label;
-    }
-
-    private Button makeButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextSize(12);
-        button.setPadding(dp(8), dp(4), dp(8), dp(4));
-
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        params.setMargins(dp(3), dp(3), dp(3), dp(3));
-        button.setLayoutParams(params);
-
-        return button;
-    }
-
-    private void openImagePicker() {
-        Intent intent = new Intent(
-                Intent.ACTION_PICK,
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        );
-        imagePicker.launch(intent);
-    }
-
-    private void loadImage(Uri uri) {
-        try (InputStream input = getContentResolver().openInputStream(uri)) {
-            Bitmap bitmap = BitmapFactory.decodeStream(input);
-
-            if (bitmap == null) {
-                Toast.makeText(this, "No se pudo abrir la imagen.", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            editor.setImage(bitmap.copy(Bitmap.Config.ARGB_8888, true));
-            setTool(EditorCanvasView.TOOL_ERASE_SOFT);
-
-        } catch (Exception e) {
-            Toast.makeText(this, "Error al cargar imagen: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
     private void saveImage() {
-        if (!editor.hasImage()) {
-            Toast.makeText(this, "Primero abre una imagen.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         try {
-            Bitmap output = editor.getOutputBitmap();
-            String fileName = "image_zeta_" + System.currentTimeMillis() + ".png";
+            Bitmap result = editorView.getEditedBitmap();
+
+            if (result == null) {
+                Toast.makeText(this, "Primero abre una imagen", Toast.LENGTH_SHORT).show();
+                return;
+            }
 
             ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, "VideoZeta_" + System.currentTimeMillis() + ".png");
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+            values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/VideoZeta");
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ImageZeta");
-                values.put(MediaStore.Images.Media.IS_PENDING, 1);
-            }
-
-            Uri uri = getContentResolver().insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    values
-            );
+            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
 
             if (uri == null) {
-                throw new Exception("No se pudo crear archivo.");
+                Toast.makeText(this, "No se pudo guardar", Toast.LENGTH_SHORT).show();
+                return;
             }
 
-            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                if (out == null) {
-                    throw new Exception("No se pudo escribir archivo.");
-                }
+            OutputStream outputStream = getContentResolver().openOutputStream(uri);
+            result.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
 
-                output.compress(Bitmap.CompressFormat.PNG, 100, out);
+            if (outputStream != null) {
+                outputStream.flush();
+                outputStream.close();
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear();
-                values.put(MediaStore.Images.Media.IS_PENDING, 0);
-                getContentResolver().update(uri, values, null, null);
-            }
-
-            Toast.makeText(this, "Guardado en Pictures/ImageZeta", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Guardado en Imágenes/VideoZeta", Toast.LENGTH_LONG).show();
 
         } catch (Exception e) {
-            Toast.makeText(this, "Error al guardar: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Error al guardar imagen", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void requestPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ) != PackageManager.PERMISSION_GRANTED) {
+    public static class EditorView extends View {
 
-                ActivityCompat.requestPermissions(
-                        this,
-                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
-                        10
-                );
+        private Bitmap originalBitmap;
+        private Bitmap editBitmap;
+
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+
+        private boolean wandEnabled = false;
+        private boolean checkerMode = true;
+
+        private float scale = 1f;
+        private float minScale = 1f;
+        private float maxScale = 8f;
+
+        private float offsetX = 0f;
+        private float offsetY = 0f;
+
+        private float lastX;
+        private float lastY;
+        private boolean dragging = false;
+        private boolean scaling = false;
+
+        private ScaleGestureDetector scaleDetector;
+
+        private final int tolerance = 38;
+
+        public EditorView(android.content.Context context) {
+            super(context);
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
+            scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                @Override
+                public boolean onScaleBegin(ScaleGestureDetector detector) {
+                    scaling = true;
+                    return true;
+                }
+
+                @Override
+                public boolean onScale(ScaleGestureDetector detector) {
+                    float oldScale = scale;
+                    scale *= detector.getScaleFactor();
+
+                    if (scale < minScale) scale = minScale;
+                    if (scale > maxScale) scale = maxScale;
+
+                    float focusX = detector.getFocusX();
+                    float focusY = detector.getFocusY();
+
+                    offsetX = focusX - ((focusX - offsetX) * scale / oldScale);
+                    offsetY = focusY - ((focusY - offsetY) * scale / oldScale);
+
+                    limitImagePosition();
+                    invalidate();
+                    return true;
+                }
+
+                @Override
+                public void onScaleEnd(ScaleGestureDetector detector) {
+                    scaling = false;
+                }
+            });
+        }
+
+        public void setImage(Bitmap bitmap) {
+            originalBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+            editBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+
+            post(() -> {
+                fitImageToScreen();
+                invalidate();
+            });
+        }
+
+        public Bitmap getEditedBitmap() {
+            return editBitmap;
+        }
+
+        public void toggleWand() {
+            wandEnabled = !wandEnabled;
+        }
+
+        public boolean isWandEnabled() {
+            return wandEnabled;
+        }
+
+        public void toggleCheckerBackground() {
+            checkerMode = !checkerMode;
+            invalidate();
+        }
+
+        public void resetImage() {
+            if (originalBitmap != null) {
+                editBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true);
+                invalidate();
+            }
+        }
+
+        private void fitImageToScreen() {
+            if (editBitmap == null || getWidth() == 0 || getHeight() == 0) return;
+
+            float viewW = getWidth();
+            float viewH = getHeight();
+
+            float imgW = editBitmap.getWidth();
+            float imgH = editBitmap.getHeight();
+
+            scale = Math.min(viewW / imgW, viewH / imgH);
+            minScale = scale;
+
+            offsetX = (viewW - imgW * scale) / 2f;
+            offsetY = (viewH - imgH * scale) / 2f;
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            drawBackground(canvas);
+
+            if (editBitmap != null) {
+                canvas.save();
+                canvas.translate(offsetX, offsetY);
+                canvas.scale(scale, scale);
+                canvas.drawBitmap(editBitmap, 0, 0, bitmapPaint);
+                canvas.restore();
+            } else {
+                paint.setColor(Color.WHITE);
+                paint.setTextSize(42f);
+                paint.setTextAlign(Paint.Align.CENTER);
+                canvas.drawText("Abre una imagen", getWidth() / 2f, getHeight() / 2f, paint);
+            }
+        }
+
+        private void drawBackground(Canvas canvas) {
+            if (!checkerMode) {
+                canvas.drawColor(Color.rgb(35, 35, 35));
+                return;
+            }
+
+            int size = 36;
+
+            for (int y = 0; y < getHeight(); y += size) {
+                for (int x = 0; x < getWidth(); x += size) {
+                    boolean white = ((x / size) + (y / size)) % 2 == 0;
+                    paint.setColor(white ? Color.WHITE : Color.rgb(35, 35, 35));
+                    canvas.drawRect(x, y, x + size, y + size, paint);
+                }
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            if (editBitmap == null) return true;
+
+            scaleDetector.onTouchEvent(event);
+
+            int action = event.getActionMasked();
+
+            if (event.getPointerCount() > 1) {
+                scaling = true;
+                return true;
+            }
+
+            float x = event.getX();
+            float y = event.getY();
+
+            switch (action) {
+                case MotionEvent.ACTION_DOWN:
+                    lastX = x;
+                    lastY = y;
+                    dragging = true;
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if (!wandEnabled && dragging && !scaling) {
+                        float dx = x - lastX;
+                        float dy = y - lastY;
+
+                        offsetX += dx;
+                        offsetY += dy;
+
+                        lastX = x;
+                        lastY = y;
+
+                        limitImagePosition();
+                        invalidate();
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                    if (wandEnabled && !scaling) {
+                        float moveDistance = Math.abs(x - lastX) + Math.abs(y - lastY);
+
+                        if (moveDistance < 15f) {
+                            eraseWithMagicWand(x, y);
+                        }
+                    }
+
+                    dragging = false;
+                    scaling = false;
+                    return true;
+            }
+
+            return true;
+        }
+
+        private void limitImagePosition() {
+            if (editBitmap == null) return;
+
+            float imgW = editBitmap.getWidth() * scale;
+            float imgH = editBitmap.getHeight() * scale;
+
+            if (imgW <= getWidth()) {
+                offsetX = (getWidth() - imgW) / 2f;
+            } else {
+                if (offsetX > 0) offsetX = 0;
+                if (offsetX + imgW < getWidth()) offsetX = getWidth() - imgW;
+            }
+
+            if (imgH <= getHeight()) {
+                offsetY = (getHeight() - imgH) / 2f;
+            } else {
+                if (offsetY > 0) offsetY = 0;
+                if (offsetY + imgH < getHeight()) offsetY = getHeight() - imgH;
+            }
+        }
+
+        private void eraseWithMagicWand(float screenX, float screenY) {
+            if (editBitmap == null) return;
+
+            int bmpX = (int) ((screenX - offsetX) / scale);
+            int bmpY = (int) ((screenY - offsetY) / scale);
+
+            if (bmpX < 0 || bmpY < 0 || bmpX >= editBitmap.getWidth() || bmpY >= editBitmap.getHeight()) {
+                return;
+            }
+
+            magicEraseSmooth(bmpX, bmpY);
+            invalidate();
+        }
+
+        private void magicEraseSmooth(int startX, int startY) {
+            int width = editBitmap.getWidth();
+            int height = editBitmap.getHeight();
+
+            int targetColor = editBitmap.getPixel(startX, startY);
+
+            if (Color.alpha(targetColor) == 0) return;
+
+            boolean[] visited = new boolean[width * height];
+            Queue<Point> queue = new LinkedList<>();
+            queue.add(new Point(startX, startY));
+
+            int processed = 0;
+            int maxProcess = width * height;
+
+            while (!queue.isEmpty() && processed < maxProcess) {
+                Point p = queue.poll();
+
+                int x = p.x;
+                int y = p.y;
+
+                if (x < 0 || y < 0 || x >= width || y >= height) continue;
+
+                int index = y * width + x;
+
+                if (visited[index]) continue;
+                visited[index] = true;
+
+                int currentColor = editBitmap.getPixel(x, y);
+
+                if (isSimilarColor(targetColor, currentColor, tolerance)) {
+                    editBitmap.setPixel(x, y, Color.TRANSPARENT);
+
+                    queue.add(new Point(x + 1, y));
+                    queue.add(new Point(x - 1, y));
+                    queue.add(new Point(x, y + 1));
+                    queue.add(new Point(x, y - 1));
+
+                    queue.add(new Point(x + 1, y + 1));
+                    queue.add(new Point(x - 1, y - 1));
+                    queue.add(new Point(x + 1, y - 1));
+                    queue.add(new Point(x - 1, y + 1));
+                }
+
+                processed++;
+            }
+
+            softenEdges();
+        }
+
+        private boolean isSimilarColor(int c1, int c2, int tol) {
+            int a2 = Color.alpha(c2);
+            if (a2 == 0) return false;
+
+            int r1 = Color.red(c1);
+            int g1 = Color.green(c1);
+            int b1 = Color.blue(c1);
+
+            int r2 = Color.red(c2);
+            int g2 = Color.green(c2);
+            int b2 = Color.blue(c2);
+
+            int diff = Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
+
+            return diff <= tol * 3;
+        }
+
+        private void softenEdges() {
+            if (editBitmap == null) return;
+
+            int width = editBitmap.getWidth();
+            int height = editBitmap.getHeight();
+
+            Bitmap copy = editBitmap.copy(Bitmap.Config.ARGB_8888, true);
+
+            for (int y = 1; y < height - 1; y++) {
+                for (int x = 1; x < width - 1; x++) {
+                    int color = copy.getPixel(x, y);
+
+                    if (Color.alpha(color) == 0) continue;
+
+                    boolean nearTransparent =
+                            Color.alpha(copy.getPixel(x + 1, y)) == 0 ||
+                            Color.alpha(copy.getPixel(x - 1, y)) == 0 ||
+                            Color.alpha(copy.getPixel(x, y + 1)) == 0 ||
+                            Color.alpha(copy.getPixel(x, y - 1)) == 0;
+
+                    if (nearTransparent) {
+                        int r = Color.red(color);
+                        int g = Color.green(color);
+                        int b = Color.blue(color);
+
+                        editBitmap.setPixel(x, y, Color.argb(120, r, g, b));
+                    }
+                }
             }
         }
     }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    private abstract static class SimpleSeekBar implements SeekBar.OnSeekBarChangeListener {
-        @Override
-        public void onStartTrackingTouch(SeekBar seekBar) {
         }
-
-        @Override
-        public void onStopTrackingTouch(SeekBar seekBar) {
-        }
-    }
-                                                 }
